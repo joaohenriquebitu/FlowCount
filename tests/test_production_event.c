@@ -15,6 +15,7 @@ struct fake_queue {
     unsigned length, count, head;
     unsigned char data[72 * sizeof(production_event_t)];
 };
+
 static QueueHandle_t active_queue;
 static bool fail_queue, fail_task, entropy_enabled;
 static unsigned rng_calls, deleted, overflow_logs, enqueued_logs, task_calls;
@@ -32,6 +33,7 @@ QueueHandle_t xQueueCreate(UBaseType_t length, UBaseType_t item_size)
     active_queue->item_size = item_size;
     return active_queue;
 }
+
 BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t wait)
 {
     assert(wait == 0); // O produtor nunca pode esperar espaço.
@@ -41,6 +43,7 @@ BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t wait)
     ++q->count;
     return pdTRUE;
 }
+
 BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait)
 {
     (void)wait;
@@ -50,9 +53,30 @@ BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait)
     --q->count;
     return pdTRUE;
 }
+
+BaseType_t xQueuePeek(QueueHandle_t q, void *item, TickType_t wait)
+{
+    (void)wait;
+
+    if (q->count == 0) {
+        return pdFALSE;
+    }
+
+    memcpy(
+        item,
+        q->data + q->head * q->item_size,
+        q->item_size
+    );
+
+    return pdTRUE;
+}
+
 UBaseType_t uxQueueMessagesWaiting(QueueHandle_t q) { return q->count; }
+
 void vQueueDelete(QueueHandle_t q) { free(q); active_queue = NULL; ++deleted; }
+
 TaskHandle_t xTaskGetCurrentTaskHandle(void) { return current_task; }
+
 BaseType_t xTaskCreate(void (*task)(void *), const char *name, unsigned stack,
                       void *arg, UBaseType_t priority, TaskHandle_t *handle)
 {
@@ -62,15 +86,20 @@ BaseType_t xTaskCreate(void (*task)(void *), const char *name, unsigned stack,
     // Não iniciar o loop infinito: consumo é controlado explicitamente no teste.
     return fail_task ? pdFALSE : pdPASS;
 }
+
 void vTaskDelay(TickType_t ticks) { (void)ticks; }
+
 void bootloader_random_enable(void) { assert(!entropy_enabled); entropy_enabled = true; }
+
 void bootloader_random_disable(void) { assert(entropy_enabled); entropy_enabled = false; }
+
 void esp_fill_random(void *buffer, size_t size)
 {
     assert(entropy_enabled && size == PRODUCTION_SESSION_BYTES);
     ++rng_calls;
     memset(buffer, (int)rng_calls, size);
 }
+
 void fake_log(const char *tag, const char *format, ...)
 {
     (void)tag;
