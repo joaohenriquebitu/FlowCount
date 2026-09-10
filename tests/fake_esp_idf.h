@@ -47,14 +47,21 @@ int fake_time_gettimeofday(struct timeval *tv, void *tz);
 
 #define CONFIG_FLOWCOUNT_STATION_ID 7
 #define CONFIG_FLOWCOUNT_EVENT_QUEUE_CAPACITY 72
+
 #ifndef CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER
 #define CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER 0
 #endif
+
+#ifndef CONFIG_FLOWCOUNT_COMM_ENABLED
+#define CONFIG_FLOWCOUNT_COMM_ENABLED 0
+#endif
+
 #define CONFIG_FLOWCOUNT_DIAGNOSTIC_DELAY_SECONDS 180
 
 QueueHandle_t xQueueCreate(UBaseType_t length, UBaseType_t item_size);
 BaseType_t xQueueSend(QueueHandle_t queue, const void *item, TickType_t wait);
 BaseType_t xQueueReceive(QueueHandle_t queue, void *item, TickType_t wait);
+BaseType_t xQueuePeek(QueueHandle_t queue, void *item, TickType_t wait);
 UBaseType_t uxQueueMessagesWaiting(QueueHandle_t queue);
 void vQueueDelete(QueueHandle_t queue);
 TaskHandle_t xTaskGetCurrentTaskHandle(void);
