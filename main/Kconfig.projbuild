@@ -1,0 +1,88 @@
+menu "FlowCount - eventos de producao"
+
+    config FLOWCOUNT_STATION_ID
+        int "Identificador numerico da estacao"
+        range 1 2147483647
+        default 1
+        help
+            Deve ser distinto para cada estacao implantada.
+
+    config FLOWCOUNT_EVENT_QUEUE_CAPACITY
+        int "Capacidade da fila de eventos em RAM"
+        range 60 1024
+        default 72
+        help
+            72 eventos: 20% de margem sobre 60, ou 144 s a 30 pecas/minuto.
+
+    config FLOWCOUNT_DIAGNOSTIC_CONSUMER
+        bool "Habilitar consumidor DESTRUTIVO de diagnostico"
+        depends on !FLOWCOUNT_COMM_ENABLED
+        default n
+        help
+            SOMENTE para ensaio. Remove eventos da RAM e imprime seus campos.
+            Nao transmite nem persiste. Desabilite para testar fila cheia.
+
+    config FLOWCOUNT_DIAGNOSTIC_DELAY_SECONDS
+        int "Espera inicial do consumidor de diagnostico (segundos)"
+        depends on FLOWCOUNT_DIAGNOSTIC_CONSUMER
+        range 0 3600
+        default 0
+        help
+            Use, por exemplo, 180 s para encher a fila e depois observar o
+            consumo dos eventos originais na mesma sessao, sem reiniciar.
+
+endmenu
+
+menu "FlowCount - horario dos eventos"
+    config FLOWCOUNT_NTP_SERVER
+        string "Servidor SNTP (nome ou IP)"
+        default "pool.ntp.org"
+        help
+            Pode ser substituido pelo IP da Raspberry Pi com servidor NTP local.
+            Consultado apos a conexao Wi-Fi obter IP.
+
+    config FLOWCOUNT_CLOCK_MAX_AGE_SECONDS
+        int "Validade maxima desde a ultima sincronizacao (segundos)"
+        range 120 604800
+        default 86400
+        help
+            Apos esse prazo, novos eventos voltam a indicar UTC invalido.
+            Deve superar CONFIG_LWIP_SNTP_UPDATE_DELAY, convertido para segundos.
+            A resincronizacao usa o intervalo normal do SNTP/lwIP (padrao: 1 hora).
+endmenu
+
+menu "FlowCount - comunicacao ESP32"
+    config FLOWCOUNT_COMM_ENABLED
+        bool "Habilitar Wi-Fi e MQTT (desativa consumo destrutivo)"
+        default y
+    config FLOWCOUNT_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+    config FLOWCOUNT_WIFI_PASSWORD
+        string "Wi-Fi senha"
+        default ""
+    config FLOWCOUNT_MQTT_URI
+        string "MQTT broker URI (mqtt://host:porta)"
+        default ""
+    config FLOWCOUNT_MQTT_USERNAME
+        string "MQTT usuario"
+        default ""
+    config FLOWCOUNT_MQTT_PASSWORD
+        string "MQTT senha"
+        default ""
+    config FLOWCOUNT_TOPIC_PREFIX
+        string "Prefixo dos topicos (letras, numeros, hifen ou underscore)"
+        default "flowcount"
+    config FLOWCOUNT_WIFI_RETRY_SECONDS
+        int "Intervalo de reconexao Wi-Fi (s)"
+        range 2 60
+        default 5
+    config FLOWCOUNT_HEARTBEAT_SECONDS
+        int "Intervalo de heartbeat (s)"
+        range 5 300
+        default 30
+    config FLOWCOUNT_ACK_TIMEOUT_SECONDS
+        int "Espera por ACK de aplicacao antes de reenviar (s)"
+        range 5 300
+        default 30
+endmenu
