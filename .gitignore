@@ -82,4 +82,5 @@ output/
 .devcontainer/
 docs/
 *.toml
-diagram.jsonintegrations/
+diagram.json
+integrations/
