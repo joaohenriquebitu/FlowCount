@@ -3,6 +3,64 @@
 #include <stdio.h>
 #include <string.h>
 #include "cJSON.h"
+#include <time.h>
+#include "sdkconfig.h"
+
+static bool timestamp_to_iso8601(
+    int64_t timestamp_ms,
+    char *buffer,
+    size_t size
+)
+{
+    if (timestamp_ms <= 0 ||
+        buffer == NULL ||
+        size == 0) {
+
+        return false;
+    }
+
+    const time_t seconds =
+        (time_t)(timestamp_ms / 1000);
+
+    const int64_t milliseconds =
+        timestamp_ms % 1000;
+
+    struct tm utc;
+
+    if (gmtime_r(&seconds, &utc) == NULL) {
+        return false;
+    }
+
+    char date[24];
+
+    if (strftime(
+            date,
+            sizeof(date),
+            "%Y-%m-%dT%H:%M:%S",
+            &utc) == 0) {
+
+        return false;
+    }
+
+    /*
+     * O evento atualmente possui precisão de milissegundos.
+     *
+     * Portanto:
+     *
+     * 123 ms -> 123000 us
+     */
+    const int written =
+        snprintf(
+            buffer,
+            size,
+            "%s.%03" PRId64 "000Z",
+            date,
+            milliseconds
+        );
+
+    return written >= 0 &&
+           (size_t)written < size;
+}
 
 void mqtt_session_text(const uint8_t session[16], char text[33])
 {
@@ -24,23 +82,62 @@ bool mqtt_topic_prefix_valid(const char *prefix)
     }
     return true;
 }
-bool mqtt_event_json(const production_event_t *e, char *buffer, size_t size)
+bool mqtt_event_json(
+    const production_event_t *event,
+    char *buffer,
+    size_t size
+)
 {
-    char session[33], utc[24];
-    mqtt_session_text(e->session, session);
-    if (e->clock_synced) {
-        if (e->timestamp_ms <= 0) return false;
-        int n = snprintf(utc, sizeof(utc), "\"%" PRId64 "\"", e->timestamp_ms);
-        if (n < 0 || (size_t)n >= sizeof(utc)) return false;
-    } else {
-        memcpy(utc, "null", 5);
+    if (event == NULL ||
+        buffer == NULL ||
+        size == 0) {
+
+        return false;
     }
-    int n = snprintf(buffer, size,
-        "{\"station\":%" PRIu32 ",\"session\":\"%s\",\"sequence\":\"%" PRIu64
-        "\",\"mono_us\":\"%" PRId64 "\",\"timestamp_ms\":%s,\"clock_synced\":%s}",
-        e->station, session, e->sequence, e->occurred_at_us, utc,
-        e->clock_synced ? "true" : "false");
-    return n >= 0 && (size_t)n < size;
+
+
+    /*
+     * A Raspberry exige um timestamp UTC válido.
+     *
+     * Não usamos o horário de transmissão como substituto,
+     * pois o evento deve manter o horário real da passagem.
+     */
+    if (!event->clock_synced ||
+        event->timestamp_ms <= 0) {
+
+        return false;
+    }
+
+
+    char timestamp[40];
+
+    if (!timestamp_to_iso8601(
+            event->timestamp_ms,
+            timestamp,
+            sizeof(timestamp))) {
+
+        return false;
+    }
+
+
+    const int written =
+        snprintf(
+            buffer,
+            size,
+
+            "{"
+            "\"bancada\":\"%s\","
+            "\"ts\":\"%s\","
+            "\"delta\":1"
+            "}",
+
+            CONFIG_FLOWCOUNT_BANCADA,
+            timestamp
+        );
+
+
+    return written >= 0 &&
+           (size_t)written < size;
 }
 bool mqtt_ack_parse(const char *buffer, size_t length, production_event_t *identity)
 {

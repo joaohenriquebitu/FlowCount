@@ -24,6 +24,7 @@ static struct {
     int64_t mono_anchor_us;
     int64_t started_at_us;
 } clock_data;
+
 // Exclusivos do chamador de poll (app_main), nunca acessados pelo callback.
 static int64_t last_poll_us;
 static bool timeout_reported;
@@ -35,6 +36,7 @@ static void on_sntp_sync(struct timeval *notification)
     const int64_t before_us = esp_timer_get_time();
     const int rc = gettimeofday(&wall, NULL);
     const int64_t after_us = esp_timer_get_time();
+
     // Não confiar apenas em time(): esta referência só é aceita no callback SNTP.
     if (notification == NULL || rc != 0 || wall.tv_sec < MIN_UNIX_SECONDS ||
         wall.tv_sec > (INT64_MAX / US_PER_SECOND) - 1 ||
@@ -46,6 +48,7 @@ static void on_sntp_sync(struct timeval *notification)
         ESP_LOGW(TAG, "Referencia SNTP invalida/imprecisa: CLOCK_UNSYNCED");
         return;
     }
+    
     const int64_t utc_us = (int64_t)wall.tv_sec * US_PER_SECOND + wall.tv_usec;
     portENTER_CRITICAL(&clock_lock);
     clock_data.utc_anchor_us = utc_us;
