@@ -1,4 +1,4 @@
-#include "counter.h"
+#include "counting/counter.h"
 
 void counter_init(counter_t *c, bool present, int64_t now_us)
 {

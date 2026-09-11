@@ -1,7 +1,7 @@
 #ifndef FLOWCOUNT_MQTT_PROTOCOL_H
 #define FLOWCOUNT_MQTT_PROTOCOL_H
 #include <stddef.h>
-#include "production_event.h"
+#include "counting/production_event.h"
 #define MQTT_PAYLOAD_SIZE 512
 #define MQTT_ACK_SIZE 256
 #define MQTT_TOPIC_SIZE 64

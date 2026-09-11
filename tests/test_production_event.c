@@ -5,9 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "fake_esp_idf.h"
-#include "production_event.h"
-#include "counter.h"
-#include "app_time.h"
+#include "counting/production_event.h"
+#include "counting/counter.h"
+#include "time/app_time.h"
 #include "fake_time.h"
 
 struct fake_queue {

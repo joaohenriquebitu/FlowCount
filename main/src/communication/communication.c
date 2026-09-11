@@ -1,4 +1,4 @@
-#include "communication.h"
+#include "communication/communication.h"
 
 #include <inttypes.h>
 
@@ -7,8 +7,8 @@
 
 #include "esp_log.h"
 
-#include "mqtt_manager.h"
-#include "production_event.h"
+#include "communication/mqtt_manager.h"
+#include "counting/production_event.h"
 
 
 #define COMMUNICATION_TASK_STACK 4096

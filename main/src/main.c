@@ -13,13 +13,13 @@
 
 #include "sdkconfig.h"
 
-#include "counter.h"
-#include "production_event.h"
-#include "app_time.h"
-#include "wifi_manager.h"
-#include "mqtt_manager.h"
-#include "buzzer.h"
-#include "communication.h"
+#include "counting/counter.h"
+#include "counting/production_event.h"
+#include "time/app_time.h"
+#include "communication/wifi_manager.h"
+#include "communication/mqtt_manager.h"
+#include "indicators/buzzer.h"
+#include "communication/communication.h"
 
 
 #define SENSOR_GPIO GPIO_NUM_7
