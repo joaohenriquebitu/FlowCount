@@ -45,6 +45,7 @@ esp_err_t esp_netif_sntp_init(const esp_sntp_config_t *config);
 int64_t esp_timer_get_time(void);
 int fake_time_gettimeofday(struct timeval *tv, void *tz);
 
+#define CONFIG_FLOWCOUNT_BANCADA "B01"
 #define CONFIG_FLOWCOUNT_STATION_ID 7
 #define CONFIG_FLOWCOUNT_EVENT_QUEUE_CAPACITY 72
 

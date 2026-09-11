@@ -37,10 +37,16 @@ static void session_hex(const uint8_t *bytes, char text[33])
 bool production_events_diagnostic_receive(production_event_t *event,
                                           TickType_t wait_ticks)
 {
-    if (CONFIG_FLOWCOUNT_COMM_ENABLED || event_queue == NULL || event == NULL) {
+#if CONFIG_FLOWCOUNT_COMM_ENABLED
+    (void)event;
+    (void)wait_ticks;
+    return false;
+#else
+    if (event_queue == NULL || event == NULL) {
         return false;
     }
     return xQueueReceive(event_queue, event, wait_ticks) == pdTRUE;
+#endif
 }
 
 #if CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER && !CONFIG_FLOWCOUNT_COMM_ENABLED

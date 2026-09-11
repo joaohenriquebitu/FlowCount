@@ -133,12 +133,73 @@ static void sample(bool present, bool edge, unsigned duration_ms)
     }
 }
 
+// Exercita a fila pelo caminho público de entrega quando a comunicação está ativa.
+static bool receive_event(production_event_t *event, TickType_t wait)
+{
+#if CONFIG_FLOWCOUNT_COMM_ENABLED
+    (void)wait;
+    if (!production_events_peek(event)) return false;
+    if (!production_events_acknowledge(event)) return false;
+    // Um ACK duplicado não pode remover o próximo evento da fila.
+    assert(!production_events_acknowledge(event));
+    return true;
+#else
+    return production_events_diagnostic_receive(event, wait);
+#endif
+}
+
+static void test_delivery_ownership(void)
+{
+    production_event_t event;
+    assert(!production_events_peek(&event));
+    assert(!production_events_acknowledge(&event));
+#if CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER
+    assert(production_events_claim_delivery() == ESP_ERR_INVALID_STATE);
+#else
+    assert(production_events_claim_delivery() == ESP_OK);
+    assert(production_events_claim_delivery() == ESP_OK);
+    current_task = &other;
+    assert(production_events_claim_delivery() == ESP_ERR_INVALID_STATE);
+    assert(!production_events_peek(&event));
+    assert(!production_events_acknowledge(&event));
+    current_task = &owner;
+    assert(!production_events_peek(NULL));
+    assert(!production_events_acknowledge(NULL));
+#endif
+}
+
+static void test_ack_retains_head(void)
+{
+#if !CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER
+    production_event_t head, again;
+    const unsigned pending = active_queue->count;
+    assert(production_events_peek(&head));
+    assert(production_events_peek(&again));
+    assert(memcmp(&head, &again, sizeof(head)) == 0);
+    assert(active_queue->count == pending);
+    ++again.sequence;
+    assert(!production_events_acknowledge(&again));
+    again = head;
+    ++again.station;
+    assert(!production_events_acknowledge(&again));
+    again = head;
+    ++again.session[0];
+    assert(!production_events_acknowledge(&again));
+    assert(active_queue->count == pending);
+#if CONFIG_FLOWCOUNT_COMM_ENABLED
+    assert(!production_events_diagnostic_receive(&again, 0));
+    assert(active_queue->count == pending);
+#endif
+#endif
+}
+
 int main(void)
 {
     production_event_t event;
     assert(app_time_init() == ESP_OK);
     assert(production_events_record(1) == ESP_ERR_INVALID_STATE);
-    assert(!production_events_diagnostic_receive(&event, 0));
+    assert(production_events_claim_delivery() == ESP_ERR_INVALID_STATE);
+    assert(!receive_event(&event, 0));
     fail_queue = true;
     assert(production_events_init() == ESP_ERR_NO_MEM);
     assert(rng_calls == 0);
@@ -158,6 +219,7 @@ int main(void)
     assert(production_events_record(1) == ESP_ERR_INVALID_STATE);
     current_task = &owner;
 
+    test_delivery_ownership();
     counter_init(&counter, false, 0);
     sample(false, false, 50);
     // Ruído não produz evento nem sequência.
@@ -187,9 +249,12 @@ int main(void)
     // Avançar 30 s e corrigir o relógio antes de consumir: nada na fila muda.
     fake_mono_us = now + 30000000;
     fake_time_sync(epoch_ms + 500000);
+    test_ack_retains_head();
+    production_stats_t stats = production_events_stats();
+    assert(stats.total == 74 && stats.lost == 2 && stats.pending == 72);
     int64_t previous_time = -1;
     for (unsigned i = 1; i <= 72; ++i) {
-        assert(production_events_diagnostic_receive(&event, 0));
+        assert(receive_event(&event, 0));
         assert(event.sequence == i && event.station == 7);
         if (i == 1) {
             assert(event.clock_synced == 0 && event.timestamp_ms == 0);
@@ -204,23 +269,25 @@ int main(void)
             assert(event.session[b] == rng_calls);
         }
     }
-    assert(!production_events_diagnostic_receive(&event, 0));
+    assert(!receive_event(&event, 0));
     // Depois de liberar espaço, a sequência não reutiliza as identidades perdidas.
     now = fake_mono_us;
     assert(production_events_record(now + 10000) == ESP_OK);
     assert(strstr(last_production_log, "total=75 queue=1/72 perdidos=2"));
-    assert(production_events_diagnostic_receive(&event, 0));
+    assert(receive_event(&event, 0));
     assert(event.sequence == 75 && event.occurred_at_us == now + 10000);
     assert(event.clock_synced == 1 && event.timestamp_ms == epoch_ms + 500010);
     // Repetir ocupação/consumo evidencia cópia por valor, ordem e reutilização RAM.
     for (unsigned i = 76; i < 1076; ++i) {
         assert(production_events_record(now + i * INT64_C(10000)) == ESP_OK);
-        assert(production_events_diagnostic_receive(&event, 0));
+        assert(receive_event(&event, 0));
         assert(event.sequence == i);
     }
+    stats = production_events_stats();
+    assert(stats.total == 1075 && stats.lost == 2 && stats.pending == 0);
     free(active_queue);
     printf("OK: integracao contador/eventos; FIFO 72; 2 overflows; timestamps; "
-           "retomada seq=75; 1000 ciclos; falhas init; consumidor=%d\n",
-           CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER);
+           "retomada seq=75; 1000 ciclos; falhas init; consumidor=%d comunicacao=%d; ownership/ACK/stats\n",
+           CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER, CONFIG_FLOWCOUNT_COMM_ENABLED);
     return 0;
 }

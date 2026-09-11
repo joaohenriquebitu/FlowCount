@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Host tests (sanitize=${{ matrix.sanitize }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libcjson-dev
+      - name: Run all host tests
+        env:
+          SANITIZE: ${{ matrix.sanitize }}
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: bash tests/run_tests.sh
+
+  firmware:
+    name: ESP32-S3 build (${{ matrix.profile }})
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v5.5.5
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [communication, diagnostic]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build firmware with clean configuration
+        shell: bash
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          . "$IDF_PATH/export.sh"
+          defaults="$RUNNER_TEMP/sdkconfig.defaults"
+          if [[ "$PROFILE" == diagnostic ]]; then
+            printf '%s\n' 'CONFIG_FLOWCOUNT_COMM_ENABLED=n' 'CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER=y' > "$defaults"
+          else
+            printf '%s\n' 'CONFIG_FLOWCOUNT_COMM_ENABLED=y' 'CONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER=n' > "$defaults"
+          fi
+          idf.py -B build-ci -DIDF_TARGET=esp32s3 \
+            -DSDKCONFIG="$RUNNER_TEMP/sdkconfig" -DSDKCONFIG_DEFAULTS="$defaults" build
+
+  required:
+    name: CI required
+    if: ${{ always() }}
+    needs: [tests, firmware]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every test and build to succeed
+        env:
+          TESTS_RESULT: ${{ needs.tests.result }}
+          FIRMWARE_RESULT: ${{ needs.firmware.result }}
+        run: |
+          test "$TESTS_RESULT" = success
+          test "$FIRMWARE_RESULT" = success

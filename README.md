@@ -69,6 +69,61 @@ mkdir -p output/tests
 idf.py -p /dev/ttyACM0 monitor 2>&1 | tee output/tests/etapa1-monitor.log
 ```
 
+## Integração contínua (GitHub Actions)
+
+O workflow `.github/workflows/ci.yml` executa em pushes de qualquer branch,
+pull requests destinados à `main`, filas de merge e acionamento manual. Não há
+filtro por arquivos: alterações de documentação também produzem o check exigido.
+
+- **Host tests:** contador, relógio, fila e protocolo MQTT, com warnings tratados
+  como erros. A suíte roda sem sanitizadores e com AddressSanitizer,
+  UndefinedBehaviorSanitizer e detecção de vazamentos.
+- **ESP32-S3 build:** compila com ESP-IDF **5.5.5**, nos perfis de comunicação e
+  diagnóstico, usando configurações novas e sem credenciais. Verifica também os
+  módulos dependentes do SDK que os testes de host não executam.
+- **CI required:** só passa quando todas as variantes de testes e build passam;
+  falhas, cancelamentos ou jobs ignorados não aprovam esse check.
+
+### Exigir aprovação antes do merge
+
+O workflow, sozinho, não bloqueia merges. Após publicar esta alteração e executar
+a CI pela primeira vez, um administrador deve configurar a proteção da `main`
+em **Settings → Branches → Branch protection rule** (ou regra equivalente em
+**Rules → Rulesets**):
+
+1. Exigir pull request antes do merge.
+2. Ativar **Require status checks to pass before merging** e selecionar
+   **CI required**, com origem GitHub Actions.
+3. Exigir a branch atualizada com `main` antes do merge (ou usar fila de merge).
+4. Aplicar a regra também aos administradores e não permitir bypass, se a
+   exigência deve valer para todos.
+
+Essa configuração é feita no GitHub; não é ativada pela presença deste arquivo.
+Consulte a [documentação de proteção de branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
+
+### Executar a suíte completa localmente
+
+No Ubuntu/Debian, instale `build-essential`, `pkg-config` e `libcjson-dev`.
+Alternativamente, ative o ESP-IDF ou defina `CJSON_DIR` para a pasta que contém
+`cJSON.c` e `cJSON.h`. Os testes usam o parser cJSON real.
+
+```bash
+bash tests/run_tests.sh
+SANITIZE=1 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+  UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 bash tests/run_tests.sh
+```
+
+É possível escolher o compilador com `CC=gcc` ou `CC=clang`. Em ambientes sob
+`ptrace` que não suportam LeakSanitizer, use `ASAN_OPTIONS=detect_leaks=0` apenas
+na execução local. A CI mantém a detecção habilitada. Uma dependência ausente ou
+qualquer teste com falha encerra o script com erro, sem pular testes.
+
+Os cenários MQTT verificam payload UTC, tamanhos de buffer, identidade da sessão,
+ACKs malformados e fora dos limites, prefixos de tópico e prazos de reenvio. A
+integração da fila roda com comunicação, sem comunicação e com diagnóstico,
+verificando propriedade de acesso, retenção até ACK e estatísticas. Não simula
+uma conexão real Wi-Fi/MQTT nem substitui os ensaios físicos.
+
 ## Ligação elétrica: confirmar antes do ensaio
 
 - Entrada de contagem: **GPIO 7**, com **presença em LOW (0)** e repouso em HIGH (1).
