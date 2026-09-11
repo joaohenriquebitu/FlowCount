@@ -1,4 +1,5 @@
 #include "communication/mqtt_manager.h"
+#include "indicators/buzzer.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -7,6 +8,7 @@
 #include "mqtt_client.h"
 
 #include "sdkconfig.h"
+#include <stdio.h>
 #include "communication/mqtt_protocol.h"
 
 
@@ -48,17 +50,22 @@ esp_err_t mqtt_manager_publish_event(
         return ESP_FAIL;
     }
 
-    const char *topic =
-    "fabrica/setorA/bancada/B01/evento";
+    char topic[MQTT_TOPIC_SIZE];
+    const int topic_length = snprintf(topic, sizeof(topic),
+        "fabrica/setorA/bancada/%s/evento", CONFIG_FLOWCOUNT_BANCADA);
+    if (topic_length < 0 || (size_t)topic_length >= sizeof(topic)) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
 	const int msg_id =
-	    esp_mqtt_client_publish(
+	    esp_mqtt_client_enqueue(
 	        mqtt_client,
 	        topic,
 	        payload,
 	        0,
 	        1,
-	        0
+	        0,
+            true
 	    );
 
     if (msg_id < 0) {
@@ -73,7 +80,7 @@ esp_err_t mqtt_manager_publish_event(
 
     ESP_LOGI(
         TAG,
-        "Evento MQTT publicado: seq=%llu msg_id=%d payload=%s",
+        "Evento entregue ao outbox MQTT: seq=%llu msg_id=%d payload=%s",
         (unsigned long long)event->sequence,
         msg_id,
         payload
@@ -104,8 +111,15 @@ static void mqtt_event_handler(
 	        MQTT_CONNECTED_BIT
 	    );
 
+        buzzer_connection_changed(BUZZER_CONNECTION_MQTT, true);
 	    break;
 
+
+    case MQTT_EVENT_DISCONNECTED:
+        xEventGroupClearBits(mqtt_event_group, MQTT_CONNECTED_BIT);
+        buzzer_connection_changed(BUZZER_CONNECTION_MQTT, false);
+        ESP_LOGW(TAG, "MQTT desconectado");
+        break;
 
     case MQTT_EVENT_ERROR:
 

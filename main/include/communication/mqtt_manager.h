@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "counting/production_event.h"
 
+// ESP_OK: payload copiado para o outbox QoS 1 do SDK (não é ACK do banco).
 esp_err_t mqtt_manager_publish_event(
     const production_event_t *event
 );

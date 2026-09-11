@@ -1,12 +1,21 @@
 # FlowCount
 
 Protótipo de contagem de peças com Heltec WiFi LoRa 32 V3 / ESP32-S3 e sensor
-fotoelétrico. **Etapa atual: 3, preparação do horário real dos eventos.**
-A contagem e a fila das etapas anteriores foram preservadas. Cada evento guarda
-UTC em milissegundos, qualidade temporal e tempo monotônico complementar.
-O módulo SNTP está implementado para ativação após conectividade, mas **ainda não
-há Wi-Fi nem sincronização real validada na placa**. Sem sincronização, UTC é
-explicitamente inválido. Não há MQTT, backend, OLED, buzzer ou persistência em Flash.
+fotoelétrico. Inclui contagem filtrada, fila de eventos em RAM, relógio UTC/SNTP,
+Wi-Fi, publicação MQTT e buzzer. Sem sincronização, o UTC do evento é marcado
+como inválido. Cada evento sai da fila da aplicação após ser aceito pelo outbox MQTT QoS 1.
+Isso não confirma persistência no banco. Backend, OLED e persistência em Flash
+não estão implementados neste firmware.
+
+## Buzzer e estado atual da comunicação
+
+O firmware atual inclui Wi-Fi, MQTT e sinalização sonora: beep de **60 ms** por
+objeto contado e **três pulsos de alerta** por queda de conexão. A implementação
+mais recente corrige o estado MQTT após desconexão e usa PWM de **2400 Hz** para
+o KC-1206, com GPIO configurável (padrão 45). Veja [ligação, diagnóstico e ensaios
+do buzzer](docs/buzzer.md). A validação acústica na montagem permanece pendente.
+As seções de etapas abaixo são registros históricos e podem descrever recursos
+que ainda não existiam quando foram escritas.
 
 ## Organização do código
 

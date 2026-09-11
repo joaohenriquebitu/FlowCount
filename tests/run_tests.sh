@@ -46,3 +46,28 @@ fi
     main/src/communication/mqtt_protocol.c tests/test_mqtt_protocol.c \
     "${cjson_link[@]}" -o "$test_dir/mqtt"
 "$test_dir/mqtt"
+
+mkdir -p "$test_dir/driver"
+printf '#include "fake_buzzer.h"\n' > "$test_dir/driver/ledc.h"
+"$compiler" "${flags[@]}" -I "$test_dir" -I tests -I main/include \
+    -include tests/fake_buzzer.h main/src/indicators/buzzer.c tests/test_buzzer.c \
+    -o "$test_dir/buzzer"
+"$test_dir/buzzer"
+for failure in 1 2 3 4; do
+    "$test_dir/buzzer" "$failure"
+done
+
+for header in esp_check.h esp_event.h esp_netif.h esp_wifi.h nvs_flash.h \
+              mqtt_client.h freertos/event_groups.h; do
+    printf '#include "fake_network.h"\n' > "$test_dir/$header"
+done
+"$compiler" "${flags[@]}" -I "$test_dir" -I tests -I main/include \
+    -include tests/fake_network.h main/src/communication/wifi_manager.c \
+    main/src/communication/mqtt_manager.c tests/test_network_alerts.c \
+    -o "$test_dir/network-alerts"
+"$test_dir/network-alerts"
+
+"$compiler" "${flags[@]}" -I "$test_dir" -I tests -I main/include \
+    -include tests/fake_network.h main/src/communication/communication.c \
+    tests/test_communication.c -o "$test_dir/communication"
+"$test_dir/communication"
