@@ -111,20 +111,6 @@ void app_main(void)
             "Buzzer indisponivel: %s",
             esp_err_to_name(buzzer_status)
         );
-    } else {
-        ESP_LOGI(
-            TAG,
-            "TESTE BUZZER: inicializacao OK"
-        );
-
-        const esp_err_t test_status =
-            buzzer_beep();
-
-        ESP_LOGI(
-            TAG,
-            "TESTE BUZZER: buzzer_beep() retornou %s",
-            esp_err_to_name(test_status)
-        );
     }
 
 
@@ -464,6 +450,15 @@ void app_main(void)
          */
         if (result & COUNTER_COUNT) {
 
+            const esp_err_t status =
+                production_events_record(
+                    occurrence_us
+                );
+
+            if (status != ESP_ERR_NO_MEM) {
+                ESP_ERROR_CHECK(status);
+            }
+
             const esp_err_t beep_status =
                 buzzer_beep();
 
@@ -473,16 +468,6 @@ void app_main(void)
                     "Falha ao acionar buzzer: %s",
                     esp_err_to_name(beep_status)
                 );
-            }
-
-
-            const esp_err_t status =
-                production_events_record(
-                    occurrence_us
-                );
-
-            if (status != ESP_ERR_NO_MEM) {
-                ESP_ERROR_CHECK(status);
             }
         }
 

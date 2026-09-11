@@ -1,4 +1,5 @@
 #include "communication/wifi_manager.h"
+#include "indicators/buzzer.h"
 #include "esp_check.h"
 
 #include <string.h>
@@ -84,6 +85,7 @@ static void wifi_event_handler(void *arg,
             wifi_event_group,
             WIFI_CONNECTED_BIT
         );
+        buzzer_connection_changed(BUZZER_CONNECTION_WIFI, false);
 
         const wifi_event_sta_disconnected_t *event =
             (const wifi_event_sta_disconnected_t *)event_data;
@@ -110,6 +112,7 @@ static void wifi_event_handler(void *arg,
             wifi_event_group,
             WIFI_CONNECTED_BIT
         );
+        buzzer_connection_changed(BUZZER_CONNECTION_WIFI, true);
     }
 }
 

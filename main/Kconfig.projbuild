@@ -90,3 +90,22 @@ menu "FlowCount - comunicacao ESP32"
         range 5 300
         default 30
 endmenu
+
+menu "FlowCount - buzzer KC-1206"
+    config FLOWCOUNT_BUZZER_GPIO
+        int "GPIO de comando do transistor do buzzer"
+        range 0 48
+        default 45
+        help
+            GPIO de sinal, nao alimentacao da bobina. Use transistor externo,
+            fonte adequada ao buzzer e GND comum. Nao compartilhar com sensor
+            (GPIO 7), flash, USB ou perifericos da placa. GPIO45 e strapping:
+            o circuito externo nao deve forcar nivel alto durante o reset.
+    config FLOWCOUNT_BUZZER_FREQUENCY_HZ
+        int "Frequencia PWM do buzzer (Hz)"
+        range 1000 4000
+        default 2400
+        help
+            KC-1206 Kingstate: transdutor passivo, nominal 5 V e 2400 Hz.
+            O PWM e de 50%; fora dos sons o GPIO permanece em LOW.
+endmenu

@@ -80,3 +80,6 @@ Desktop.ini
 output/
 .vscode/
 .devcontainer/
+docs/
+*.toml
+diagram.json
