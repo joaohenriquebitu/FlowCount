@@ -83,3 +83,4 @@ output/
 docs/
 *.toml
 diagram.json
+integrations/
