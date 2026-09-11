@@ -31,6 +31,10 @@ menu "FlowCount - eventos de producao"
             Use, por exemplo, 180 s para encher a fila e depois observar o
             consumo dos eventos originais na mesma sessao, sem reiniciar.
 
+    config FLOWCOUNT_BANCADA
+        string "Identificador da bancada"
+        default "B01"
+
 endmenu
 
 menu "FlowCount - horario dos eventos"

@@ -49,17 +49,17 @@ esp_err_t mqtt_manager_publish_event(
     }
 
     const char *topic =
-        "fabrica/setorA/bancada/B01/evento";
+    "fabrica/setorA/bancada/B01/evento";
 
-    const int msg_id =
-        esp_mqtt_client_publish(
-            mqtt_client,
-            topic,
-            payload,
-            0,
-            1,
-            0
-        );
+	const int msg_id =
+	    esp_mqtt_client_publish(
+	        mqtt_client,
+	        topic,
+	        payload,
+	        0,
+	        1,
+	        0
+	    );
 
     if (msg_id < 0) {
 
