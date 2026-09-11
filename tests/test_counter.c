@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
-#include "counter.h"
+#include "counting/counter.h"
 
 static counter_t c;
 static int64_t now;

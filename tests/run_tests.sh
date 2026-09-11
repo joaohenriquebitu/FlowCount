@@ -14,15 +14,15 @@ flags=(-D_POSIX_C_SOURCE=200809L -pthread -std=c11 -Wall -Wextra -Werror -pedant
 if [[ "${SANITIZE:-0}" == 1 ]]; then
     flags+=(-fsanitize=address,undefined)
 fi
-cc "${flags[@]}" -I main main/counter.c tests/test_counter.c -o "$test_dir/counter"
+cc "${flags[@]}" -I main/include main/src/counting/counter.c tests/test_counter.c -o "$test_dir/counter"
 "$test_dir/counter"
-cc "${flags[@]}" -I "$test_dir" -I tests -I main \
-    main/app_time.c tests/fake_time.c tests/test_app_time.c -o "$test_dir/clock"
+cc "${flags[@]}" -I "$test_dir" -I tests -I main/include \
+    main/src/time/app_time.c tests/fake_time.c tests/test_app_time.c -o "$test_dir/clock"
 "$test_dir/clock"
 for diagnostic in 0 1; do
-    cc "${flags[@]}" -I "$test_dir" -I tests -I main \
+    cc "${flags[@]}" -I "$test_dir" -I tests -I main/include \
         -DCONFIG_FLOWCOUNT_DIAGNOSTIC_CONSUMER="$diagnostic" \
-        main/counter.c main/production_event.c main/app_time.c tests/fake_time.c tests/test_production_event.c \
+        main/src/counting/counter.c main/src/counting/production_event.c main/src/time/app_time.c tests/fake_time.c tests/test_production_event.c \
         -o "$test_dir/events-$diagnostic"
     "$test_dir/events-$diagnostic"
 done

@@ -1,4 +1,4 @@
-#include "mqtt_manager.h"
+#include "communication/mqtt_manager.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -7,7 +7,7 @@
 #include "mqtt_client.h"
 
 #include "sdkconfig.h"
-#include "mqtt_protocol.h"
+#include "communication/mqtt_protocol.h"
 
 
 #define MQTT_CONNECTED_BIT BIT0

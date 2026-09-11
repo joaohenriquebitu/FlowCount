@@ -1,4 +1,4 @@
-#include "mqtt_protocol.h"
+#include "communication/mqtt_protocol.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>

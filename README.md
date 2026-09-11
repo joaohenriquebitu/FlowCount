@@ -8,6 +8,33 @@ O módulo SNTP está implementado para ativação após conectividade, mas **ain
 há Wi-Fi nem sincronização real validada na placa**. Sem sincronização, UTC é
 explicitamente inválido. Não há MQTT, backend, OLED, buzzer ou persistência em Flash.
 
+## Organização do código
+
+O firmware permanece no componente `main` do ESP-IDF. Os headers públicos ficam
+em `include/` e as implementações em `src/`, com a mesma divisão por responsabilidade:
+
+```text
+main/
+├── CMakeLists.txt
+├── Kconfig.projbuild
+├── include/
+│   ├── communication/   # Comunicação, Wi-Fi, MQTT e protocolo
+│   ├── counting/        # Contagem e eventos de produção
+│   ├── indicators/      # Sinalização por buzzer
+│   └── time/            # Relógio e sincronização SNTP
+└── src/
+    ├── main.c           # Ponto de entrada e integração da aplicação
+    ├── communication/
+    ├── counting/
+    ├── indicators/
+    └── time/
+```
+
+Os includes usam o caminho do módulo, por exemplo, `#include "counting/counter.h"`.
+Ao adicionar um módulo, coloque o `.h` e o `.c` nas pastas correspondentes e
+registre a implementação em `main/CMakeLists.txt`. Os testes de host e seus
+adaptadores permanecem em `tests/`.
+
 ## Ambiente e compilação
 
 Compilação verificada com **ESP-IDF v5.5.5**, target **esp32s3**. No computador
@@ -80,8 +107,8 @@ borda: mesmo várias oscilações entre amostras invalidam a estabilidade. Esta 
 **não é a fila de eventos de produção**. A fila adicionada na Etapa 2 guarda
 passagens completas, não bordas ou notificações de GPIO.
 
-O módulo `main/counter.c` contém a máquina de estados, sem dependência de ESP-IDF;
-o módulo `main/main.c` cuida de GPIO, tempo monotônico, execução periódica e logs.
+O módulo `main/src/counting/counter.c` contém a máquina de estados, sem dependência de ESP-IDF;
+o módulo `main/src/main.c` cuida de GPIO, tempo monotônico, execução periódica e logs.
 O estado da máquina e a geração das sequências são exclusivos de `app_main`.
 A Etapa 2 acrescenta uma fila e, opcionalmente, uma tarefa de diagnóstico.
 Falhas de configuração do GPIO/ISR usam `ESP_ERROR_CHECK`
@@ -91,11 +118,11 @@ e interrompem a inicialização com diagnóstico, em vez de seguir contando.
 
 | Parâmetro | Local | Valor inicial |
 |---|---|---|
-| Presença estável | `main/counter.h`: `COUNTER_PRESENCE_US` | 30 ms |
-| Liberação estável | `main/counter.h`: `COUNTER_RELEASE_US` | 50 ms |
-| Presença prolongada | `main/counter.h`: `COUNTER_BLOCKED_US` | 5 s |
-| Máxima lacuna de amostragem | `main/counter.h`: `COUNTER_MAX_SAMPLE_GAP_US` | 100 ms |
-| Período da tarefa | `main/main.c`: `SENSOR_SAMPLE_MS` | 10 ms, no mínimo 1 tick |
+| Presença estável | `main/include/counting/counter.h`: `COUNTER_PRESENCE_US` | 30 ms |
+| Liberação estável | `main/include/counting/counter.h`: `COUNTER_RELEASE_US` | 50 ms |
+| Presença prolongada | `main/include/counting/counter.h`: `COUNTER_BLOCKED_US` | 5 s |
+| Máxima lacuna de amostragem | `main/include/counting/counter.h`: `COUNTER_MAX_SAMPLE_GAP_US` | 100 ms |
+| Período da tarefa | `main/src/main.c`: `SENSOR_SAMPLE_MS` | 10 ms, no mínimo 1 tick |
 
 Os tempos são medidos com `esp_timer_get_time()` em microssegundos. O instante
 de confirmação da passagem é preservado como tempo monotônico complementar;
@@ -134,8 +161,8 @@ elétrica e a calibração continuam necessárias.
 No diretório do projeto, com GCC instalado:
 
 ```bash
-gcc -std=c11 -Wall -Wextra -Werror -pedantic -I main \
-  main/counter.c tests/test_counter.c -o /tmp/flowcount-test-counter
+gcc -std=c11 -Wall -Wextra -Werror -pedantic -I main/include \
+  main/src/counting/counter.c tests/test_counter.c -o /tmp/flowcount-test-counter
 /tmp/flowcount-test-counter
 ```
 
@@ -213,7 +240,7 @@ Etapa 2, descrita a seguir; isso não substitui a validação física da Etapa 1
 
 ### Modelo de dados e identidade
 
-`main/production_event.h` define o formato atual de **48 bytes**, ampliado dos
+`main/include/counting/production_event.h` define o formato atual de **48 bytes**, ampliado dos
 40 bytes da Etapa 2 para incluir UTC na Etapa 3. Não há ponteiros, strings longas
 nem alocação por passagem:
 
@@ -426,7 +453,7 @@ sincronização pela rede continua dependente da futura conectividade.
 
 ### Decisão de escopo e integração futura
 
-Não existia Wi-Fi no repositório. Foi implementado `main/app_time.c` com a API
+Não existia Wi-Fi no repositório. Foi implementado `main/src/time/app_time.c` com a API
 `esp_netif_sntp_init()` do **ESP-IDF 5.5.5**, sem adicionar camada de conexão ou
 credenciais. `app_time_init()` inicializa somente o estado local e permite coletar
 imediatamente. **No firmware atual o SNTP ainda não inicia**, pois não há rede.

@@ -1,4 +1,4 @@
-#include "wifi_manager.h"
+#include "communication/wifi_manager.h"
 #include "esp_check.h"
 
 #include <string.h>

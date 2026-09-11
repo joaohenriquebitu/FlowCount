@@ -1,4 +1,4 @@
-#include "buzzer.h"
+#include "indicators/buzzer.h"
 
 #include <stdbool.h>
 #include <stdint.h>

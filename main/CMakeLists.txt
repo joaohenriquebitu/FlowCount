@@ -1,16 +1,16 @@
 idf_component_register(
     SRCS
-        "main.c"
-        "counter.c"
-        "production_event.c"
-        "app_time.c"
-        "wifi_manager.c"
-        "mqtt_manager.c"
-        "mqtt_protocol.c"
-        "buzzer.c"
-        "communication.c"
+        "src/main.c"
+        "src/counting/counter.c"
+        "src/counting/production_event.c"
+        "src/time/app_time.c"
+        "src/communication/wifi_manager.c"
+        "src/communication/mqtt_manager.c"
+        "src/communication/mqtt_protocol.c"
+        "src/indicators/buzzer.c"
+        "src/communication/communication.c"
 
-    INCLUDE_DIRS "."
+    INCLUDE_DIRS "include"
 
     PRIV_REQUIRES
         esp_driver_gpio
