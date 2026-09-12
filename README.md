@@ -1,682 +1,909 @@
 # FlowCount
 
-Protótipo de contagem de peças com Heltec WiFi LoRa 32 V3 / ESP32-S3 e sensor
-fotoelétrico. Inclui contagem filtrada, fila de eventos em RAM, relógio UTC/SNTP,
-Wi-Fi, publicação MQTT e buzzer. Sem sincronização, o UTC do evento é marcado
-como inválido. Cada evento sai da fila da aplicação após ser aceito pelo outbox MQTT QoS 1.
-Isso não confirma persistência no banco. Backend, OLED e persistência em Flash
-não estão implementados neste firmware.
+Sistema de contagem automatizada de peças para ambientes industriais, composto por um nó de bancada baseado em ESP32-S3 e por um servidor de supervisão executado em Raspberry Pi 5.
 
-## Buzzer e estado atual da comunicação
+O FlowCount detecta a passagem de peças por um sensor fotoelétrico, registra cada passagem válida, envia os eventos pela rede Wi-Fi e apresenta os dados em dashboards no Grafana. O sistema também fornece sinalização local por buzzer e LED e mantém uma fila temporária de eventos no microcontrolador para lidar com indisponibilidades momentâneas de comunicação.
 
-O firmware atual inclui Wi-Fi, MQTT e sinalização sonora: beep de **60 ms** por
-objeto contado e **três pulsos de alerta** por queda de conexão. A implementação
-mais recente corrige o estado MQTT após desconexão e usa PWM de **2400 Hz** para
-o KC-1206, com GPIO configurável (padrão 45). Veja [ligação, diagnóstico e ensaios
-do buzzer](docs/buzzer.md). A validação acústica na montagem permanece pendente.
-As seções de etapas abaixo são registros históricos e podem descrever recursos
-que ainda não existiam quando foram escritas.
+A implementação atual utiliza a placa **Heltec WiFi LoRa 32 V3**, porém a comunicação usada pelo firmware neste estágio é **Wi-Fi + MQTT**. O rádio LoRa da placa não faz parte do fluxo atual do sistema.
 
-## Organização do código
+## Demonstração
 
-O firmware permanece no componente `main` do ESP-IDF. Os headers públicos ficam
-em `include/` e as implementações em `src/`, com a mesma divisão por responsabilidade:
+![Demonstração do FlowCount](assets/demo/flowcount-demo.mp4)
+
+## Sumário
+
+- [Visão geral](#visão-geral)
+- [Como o sistema funciona](#como-o-sistema-funciona)
+- [Arquitetura](#arquitetura)
+- [Materiais necessários](#materiais-necessários)
+- [Tecnologias e versões](#tecnologias-e-versões)
+- [Estrutura do repositório](#estrutura-do-repositório)
+- [Documentação detalhada](#documentação-detalhada)
+- [Como executar o projeto](#como-executar-o-projeto)
+  - [1. Preparar o servidor](#1-preparar-o-servidor)
+  - [2. Preparar o ambiente do firmware](#2-preparar-o-ambiente-do-firmware)
+  - [3. Configurar o firmware](#3-configurar-o-firmware)
+  - [4. Compilar e gravar a Heltec](#4-compilar-e-gravar-a-heltec)
+  - [5. Verificar o sistema completo](#5-verificar-o-sistema-completo)
+- [Configurações principais](#configurações-principais)
+- [Fluxo completo de execução](#fluxo-completo-de-execução)
+- [Testes e integração contínua](#testes-e-integração-contínua)
+- [Estado atual e limitações](#estado-atual-e-limitações)
+- [Boas práticas de segurança](#boas-práticas-de-segurança)
+- [Equipe](#equipe)
+
+## Visão geral
+
+O FlowCount foi desenvolvido para automatizar a contagem de peças que passam por um ponto de uma linha de produção ou esteira. A proposta é substituir contagens manuais ou soluções isoladas por um sistema simples de instalar, de baixo custo e capaz de disponibilizar os dados de produção em uma interface centralizada.
+
+Cada ponto monitorado possui um **nó de bancada**. Esse nó contém o sensor fotoelétrico, a placa Heltec com ESP32-S3 e os componentes de sinalização. Quando uma peça atravessa o sensor, o firmware valida a passagem e gera um evento de produção.
+
+Os eventos seguem para um servidor central, normalmente uma **Raspberry Pi 5**, onde são recebidos, armazenados e disponibilizados para visualização. O painel Grafana permite acompanhar informações de produção ao longo do tempo sem que o usuário precise interagir diretamente com o microcontrolador.
+
+Em termos simples, o sistema pode ser entendido assim:
 
 ```text
-main/
+Peça passa pelo sensor
+        |
+        v
+ESP32 valida a passagem
+        |
+        v
+Evento é enviado pela rede
+        |
+        v
+Raspberry Pi recebe e armazena
+        |
+        v
+Grafana apresenta os dados
+```
+
+## Como o sistema funciona
+
+O FlowCount é dividido em duas partes principais.
+
+### Nó de bancada
+
+O nó de bancada é responsável por interagir com o processo físico. Ele utiliza:
+
+- sensor fotoelétrico E18-D80NK para detectar a passagem da peça;
+- Heltec WiFi LoRa 32 V3, baseada em ESP32-S3, para executar o firmware;
+- buzzer KC-1206 para sinalização sonora;
+- LED vermelho para sinalização visual;
+- circuito com transistor e resistores para interfacear corretamente os componentes.
+
+O firmware executa continuamente a leitura do sensor, identifica uma passagem válida, registra o evento e tenta encaminhá-lo ao servidor.
+
+### Servidor
+
+O servidor é executado em uma Raspberry Pi 5 ou, para desenvolvimento, em outro computador compatível com Docker.
+
+Ele utiliza quatro serviços principais:
+
+1. **Mosquitto** recebe os eventos enviados pelos nós de bancada;
+2. **Telegraf** processa os eventos recebidos;
+3. **InfluxDB** armazena o histórico de produção;
+4. **Grafana** apresenta os dados em dashboards.
+
+O servidor usado pelo FlowCount é mantido separadamente no repositório:
+
+```text
+https://github.com/ValdimiroAlves/Grafana_Dashboards
+```
+
+Isso significa que clonar apenas este repositório fornece o firmware do nó de bancada, mas não instala automaticamente o servidor da Raspberry Pi.
+
+## Arquitetura
+
+A solução segue uma arquitetura distribuída de **edge computing + servidor de supervisão**.
+
+O processamento diretamente relacionado ao sensor acontece no ESP32-S3, próximo ao processo físico. A Raspberry Pi concentra os serviços de comunicação, armazenamento e visualização.
+
+```mermaid
+flowchart LR
+    subgraph EDGE["Nó de bancada - Edge"]
+        SENSOR["Sensor fotoelétrico\nE18-D80NK"] --> ESP["Heltec WiFi LoRa 32 V3\nESP32-S3"]
+        ESP --> SIGNAL["Buzzer KC-1206\nLED vermelho"]
+        ESP --> QUEUE["Fila temporária\nde eventos em RAM"]
+    end
+
+    NTP["Servidor NTP/SNTP"] --> ESP
+
+    QUEUE -->|"Wi-Fi / MQTT"| BROKER
+
+    subgraph SERVER["Servidor - Raspberry Pi 5"]
+        BROKER["Eclipse Mosquitto"] --> TELEGRAF["Telegraf"]
+        TELEGRAF --> INFLUX["InfluxDB"]
+        INFLUX --> GRAFANA["Grafana"]
+    end
+
+    USER["Operador / equipe"] -->|"Navegador web"| GRAFANA
+```
+
+### Responsabilidades por camada
+
+| Camada | Responsabilidade |
+|---|---|
+| Sensor | Detectar fisicamente a presença/passagem de uma peça |
+| ESP32-S3 | Validar a leitura, gerar eventos, controlar sinalização e comunicação |
+| Wi-Fi | Interligar o nó de bancada ao servidor |
+| Mosquitto | Receber as mensagens dos nós de bancada |
+| Telegraf | Transformar e encaminhar os dados recebidos |
+| InfluxDB | Manter o histórico temporal da produção |
+| Grafana | Exibir os dados em dashboards |
+
+Detalhes internos de contagem, protocolo MQTT, sincronização de horário e sinalização ficam nas documentações específicas dos módulos, evitando transformar este README em uma especificação de implementação.
+
+## Materiais necessários
+
+A tabela abaixo considera a reprodução de **uma estação de contagem** conectada a um servidor central. Para monitorar várias bancadas, replique os componentes marcados como "por estação".
+
+| Item | Quantidade | Função | Observação |
+|---|---:|---|---|
+| Heltec WiFi LoRa 32 V3 | 1 por estação | Executar o firmware do FlowCount | Placa baseada em ESP32-S3; LoRa não é utilizado no fluxo atual |
+| Sensor fotoelétrico E18-D80NK | 1 por estação | Detectar a passagem das peças | Entrada de contagem utilizada pelo firmware |
+| Buzzer KC-1206 | 1 por estação | Sinalização sonora | Acionado por PWM através de transistor |
+| Transistor NPN 2N2222A-1726 | 1 por estação | Acionamento do buzzer | Evita alimentar a carga diretamente pelo GPIO |
+| Resistor 100 kΩ | 3 por estação | Interface do sensor | Valores utilizados no protótipo atual |
+| Resistor 2 kΩ | 1 por estação | Interface do transistor/buzzer | Utilizado no comando do transistor |
+| Resistor 220 Ω | 1 por estação | Limitação de corrente do LED | Ligado em série com o LED |
+| LED vermelho | 1 por estação | Sinalização visual | Indicador físico do protótipo |
+| Protoboard ou placa de montagem | 1 por estação | Montagem do circuito | Para protótipo; em versão final pode ser substituída por PCB |
+| Jumpers/fios de conexão | Conforme necessário | Interligação elétrica | Macho-macho, macho-fêmea ou conforme a montagem |
+| Cabo USB de dados para a Heltec | 1 por estação | Alimentação, gravação e monitor serial | Deve permitir transferência de dados |
+| Fonte/linha de 5 V adequada | 1 por estação | Alimentar os componentes de 5 V | Utilizar GND comum entre os elementos da estação |
+| Diodo de proteção para carga indutiva | 1 por estação | Proteção do acionamento do buzzer | Recomendado para a montagem final; dimensionar conforme o componente usado |
+| Esteira ou estrutura de passagem | 1 | Movimentar as peças pelo ponto de leitura | Pode ser substituída por passagem manual durante testes |
+| Raspberry Pi 5 | 1 por instalação | Executar o servidor central | Um único servidor pode atender várias estações |
+| Fonte USB-C 27 W para Raspberry Pi 5 | 1 | Alimentar a Raspberry Pi | A documentação do servidor recomenda fonte adequada à Pi 5 |
+| Cooler ativo para Raspberry Pi 5 | 1 | Refrigeração | Recomendado para operação contínua |
+| Cartão microSD A2/V30 de 128 GB | 1 | Sistema operacional e dados da Raspberry Pi | Configuração de referência do servidor; SSD USB é uma alternativa para uso contínuo |
+| Roteador ou ponto de acesso Wi-Fi | 1 | Comunicação entre ESP32 e servidor | O ESP32 e a Raspberry precisam alcançar a mesma infraestrutura de rede |
+| Computador de desenvolvimento | 1 | Compilar e gravar o firmware | Linux é o ambiente descrito neste README |
+
+A ligação elétrica detalhada deve ser documentada separadamente em `docs/hardware.md`.
+
+## Tecnologias e versões
+
+### Firmware
+
+| Tecnologia / componente | Versão usada pelo projeto | Situação |
+|---|---|---|
+| ESP-IDF | **5.5.5** | Versão verificada pelo projeto e fixada na CI |
+| Target ESP-IDF | **esp32s3** | Obrigatório para a placa utilizada |
+| Linguagem | **C11** | Os testes de host são compilados com `-std=c11` |
+| CMake | **3.16 ou superior** | Versão mínima definida no `CMakeLists.txt` |
+| FreeRTOS | Incluído no ESP-IDF 5.5.5 | Não possui versão independente fixada neste repositório |
+| ESP-MQTT | Incluído no ESP-IDF 5.5.5 | Usado para comunicação MQTT |
+| esp_wifi / esp_netif | Incluídos no ESP-IDF 5.5.5 | Conectividade Wi-Fi |
+| esp_timer | Incluído no ESP-IDF 5.5.5 | Temporização da aplicação |
+| esp_driver_gpio | Incluído no ESP-IDF 5.5.5 | Entrada do sensor |
+| esp_driver_ledc | Incluído no ESP-IDF 5.5.5 | PWM do buzzer |
+| cJSON | Incluído no ESP-IDF 5.5.5 | Serialização e testes do protocolo |
+| lwIP/SNTP | Incluído no ESP-IDF 5.5.5 | Sincronização de horário |
+| GitHub Actions runner | **Ubuntu 24.04** | Ambiente atual da suíte de CI |
+| Imagem de CI do firmware | **espressif/idf:v5.5.5** | Build automatizado do ESP32-S3 |
+| actions/checkout | **v4** | Usado pelo workflow de CI |
+
+### Servidor
+
+O servidor está definido no repositório `ValdimiroAlves/Grafana_Dashboards`.
+
+| Serviço | Tag configurada |
+|---|---|
+| Eclipse Mosquitto | `eclipse-mosquitto:2` |
+| InfluxDB | `influxdb:1.8` |
+| Telegraf | `telegraf:1.30` |
+| Grafana OSS | `grafana/grafana-oss:11.2.0` |
+| Sistema operacional recomendado | Raspberry Pi OS Lite 64-bit |
+| Orquestração | Docker Engine + Docker Compose plugin |
+
+### Observação sobre reprodutibilidade
+
+O firmware está fixado em ESP-IDF 5.5.5. No servidor, a versão do Grafana está fixada em `11.2.0`, mas as tags `2`, `1.8` e `1.30` de Mosquitto, InfluxDB e Telegraf não fixam um patch específico e podem apontar para imagens mais novas dentro da mesma série.
+
+Para uma implantação totalmente reprodutível, recomenda-se futuramente substituir essas tags por versões completas ou por digests de imagem Docker.
+
+Também não há uma versão exata de Docker Engine, Docker Compose, Raspberry Pi OS ou `paho-mqtt` fixada pelo projeto neste momento. O README não atribui versões que o código não define.
+
+## Estrutura do repositório
+
+A organização principal do firmware é modular. Headers públicos ficam em `main/include` e implementações em `main/src`.
+
+```text
+FlowCount/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── assets/
+│   └── demo/
+│       └── flowcount-demo.gif          
+├── docs/                               # documentação complementar
+│   ├── hardware.md                     
+│   ├── raspberry.md                           
+│   └── buzzer.md
+├── main/
+│   ├── CMakeLists.txt
+│   ├── Kconfig.projbuild
+│   ├── include/
+│   │   ├── communication/
+│   │   │   ├── communication.h
+│   │   │   ├── mqtt_manager.h
+│   │   │   ├── mqtt_protocol.h
+│   │   │   └── wifi_manager.h
+│   │   ├── counting/
+│   │   │   ├── counter.h
+│   │   │   └── production_event.h
+│   │   ├── indicators/
+│   │   │   └── buzzer.h
+│   │   └── time/
+│   │       └── app_time.h
+│   └── src/
+│       ├── main.c
+│       ├── communication/
+│       │   ├── communication.c
+│       │   ├── mqtt_manager.c
+│       │   ├── mqtt_protocol.c
+│       │   └── wifi_manager.c
+│       ├── counting/
+│       │   ├── counter.c
+│       │   └── production_event.c
+│       ├── indicators/
+│       │   └── buzzer.c
+│       └── time/
+│           └── app_time.c
+├── tests/
+│   ├── run_tests.sh
+│   ├── test_counter.c
+│   ├── test_production_event.c
+│   ├── test_communication.c
+│   ├── test_mqtt_protocol.c
+│   ├── test_network_alerts.c
+│   ├── test_buzzer.c
+│   └── test_app_time.c
 ├── CMakeLists.txt
-├── Kconfig.projbuild
-├── include/
-│   ├── communication/   # Comunicação, Wi-Fi, MQTT e protocolo
-│   ├── counting/        # Contagem e eventos de produção
-│   ├── indicators/      # Sinalização por buzzer
-│   └── time/            # Relógio e sincronização SNTP
-└── src/
-    ├── main.c           # Ponto de entrada e integração da aplicação
-    ├── communication/
-    ├── counting/
-    ├── indicators/
-    └── time/
+├── .clangd
+├── .gitignore
+└── README.md
 ```
 
-Os includes usam o caminho do módulo, por exemplo, `#include "counting/counter.h"`.
-Ao adicionar um módulo, coloque o `.h` e o `.c` nas pastas correspondentes e
-registre a implementação em `main/CMakeLists.txt`. Os testes de host e seus
-adaptadores permanecem em `tests/`.
+### Organização lógica
 
-## Ambiente e compilação
+```mermaid
+flowchart TD
+    MAIN["main.c\nIntegração da aplicação"]
 
-Compilação verificada com **ESP-IDF v5.5.5**, target **esp32s3**. No computador
-usado para esta alteração, o instalador EIM fornece a ativação abaixo:
+    MAIN --> COUNTING["counting\nLeitura lógica e eventos de produção"]
+    MAIN --> COMM["communication\nWi-Fi, MQTT e envio"]
+    MAIN --> TIME["time\nHorário e sincronização"]
+    MAIN --> IND["indicators\nSinalização sonora"]
+
+    COUNTING --> COUNTER["counter.c"]
+    COUNTING --> EVENT["production_event.c"]
+
+    COMM --> WIFI["wifi_manager.c"]
+    COMM --> MQTT["mqtt_manager.c"]
+    COMM --> PROTOCOL["mqtt_protocol.c"]
+    COMM --> DELIVERY["communication.c"]
+
+    TIME --> APPTIME["app_time.c"]
+    IND --> BUZZER["buzzer.c"]
+
+    TESTS["tests/"] -. valida .-> COUNTING
+    TESTS -. valida .-> COMM
+    TESTS -. valida .-> TIME
+    TESTS -. valida .-> IND
+```
+
+## Documentação detalhada
+
+Este README apresenta apenas o funcionamento geral e o processo de instalação. Os detalhes de implementação devem permanecer próximos aos respectivos módulos.
+
+| Documento | Caminho | Conteúdo esperado |
+|---|---|---|
+| Visão detalhada do firmware | [main/README.md](main/README.md) | Inicialização, responsabilidades e integração dos módulos |
+| Contagem e geração de eventos | [main/src/counting/README.md](main/src/counting/README.md) | Máquina de estados, filtros e fila de produção |
+| Comunicação | [main/src/communication/README.md](main/src/communication/README.md) | Wi-Fi, MQTT, formato das mensagens e entrega |
+| Sinalização | [main/src/indicators/README.md](main/src/indicators/README.md) | Buzzer, LED e estados de sinalização |
+| Horário | [main/src/time/README.md](main/src/time/README.md) | SNTP, timestamps e validade do relógio |
+| Hardware e montagem | [docs/hardware.md](docs/hardware.md) | Esquemático, pinagem, alimentação e montagem física |
+| Buzzer KC-1206 | [docs/buzzer.md](docs/buzzer.md) | Funcionamento e validação do circuito do buzzer |
+| Raspberry Pi / servidor | [docs/raspberry.md](docs/raspberry.md) | Preparação da Raspberry e integração com o servidor |
+| Testes | [tests/README.md](tests/README.md) | Como executar e interpretar a suíte de testes |
+
+## Como executar o projeto
+
+Para reproduzir o FlowCount completo, prepare primeiro o **servidor** e depois o **firmware da estação**. Dessa forma, o endereço do broker já estará definido quando o ESP32 for configurado.
+
+As instruções abaixo consideram Ubuntu/Debian no computador de desenvolvimento e Raspberry Pi OS Lite 64-bit no servidor.
+
+## 1. Preparar o servidor
+
+### 1.1 Preparar a Raspberry Pi 5
+
+Utilize o Raspberry Pi Imager para instalar:
+
+```text
+Raspberry Pi OS Lite (64-bit)
+```
+
+Durante a gravação, recomenda-se configurar:
+
+- hostname;
+- usuário e senha;
+- SSH;
+- Wi-Fi, caso não utilize Ethernet;
+- país da rede sem fio;
+- fuso horário;
+- teclado.
+
+Depois do primeiro boot, conecte-se por SSH:
 
 ```bash
-cd /home/irlan-barros/projetos/FlowCount
-source /home/irlan-barros/.espressif/tools/activate_idf_v5.5.5.sh
+ssh <usuario>@<ip-da-raspberry>
+```
+
+Atualize o sistema:
+
+```bash
+sudo apt update
+sudo apt full-upgrade -y
+sudo apt install -y git curl mosquitto-clients
+```
+
+### 1.2 Definir um endereço estável para a Raspberry
+
+O ESP32 precisa saber onde está o broker MQTT. Por isso, evite que o endereço da Raspberry mude constantemente.
+
+A opção mais simples é criar uma **reserva DHCP no roteador** para o endereço MAC da Raspberry Pi.
+
+Para consultar os endereços de rede:
+
+```bash
+ip a
+```
+
+Anote o IPv4 da Raspberry. Ele será usado depois na configuração do firmware, por exemplo:
+
+```text
+192.168.1.50
+```
+
+### 1.3 Instalar Docker
+
+Na Raspberry:
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+```
+
+Saia da sessão SSH e entre novamente para aplicar o grupo `docker`:
+
+```bash
+exit
+ssh <usuario>@<ip-da-raspberry>
+```
+
+Valide a instalação:
+
+```bash
+docker run --rm hello-world
+docker compose version
+```
+
+### 1.4 Clonar o servidor do projeto
+
+```bash
+cd ~
+git clone https://github.com/ValdimiroAlves/Grafana_Dashboards.git
+cd Grafana_Dashboards
+```
+
+Crie o arquivo de ambiente:
+
+```bash
+cp .env.example .env
+```
+
+Edite-o e defina uma senha para o Grafana:
+
+```bash
+nano .env
+```
+
+Garanta que os serviços consigam ler os arquivos de configuração:
+
+```bash
+chmod -R a+rX grafana telegraf mosquitto
+```
+
+### 1.5 Subir os serviços
+
+```bash
+docker compose up -d
+```
+
+Confira o estado:
+
+```bash
+docker compose ps
+```
+
+Os serviços esperados são:
+
+```text
+saap-mosquitto
+saap-influxdb
+saap-telegraf
+saap-grafana
+```
+
+Para acompanhar a ingestão de dados:
+
+```bash
+docker compose logs -f telegraf
+```
+
+O Grafana ficará disponível em:
+
+```text
+http://<ip-da-raspberry>:3000
+```
+
+A porta MQTT usada pelo firmware é:
+
+```text
+1883
+```
+
+### 1.6 Testar o servidor antes do ESP32
+
+É recomendável validar o servidor isoladamente antes de gravar o firmware.
+
+O repositório do servidor inclui um simulador de bancadas. Siga as instruções específicas daquele repositório para executá-lo e confirme que os dados aparecem no Grafana.
+
+Quando o servidor estiver funcionando, mantenha anotado:
+
+```text
+IP da Raspberry: <ip>
+Porta MQTT: 1883
+```
+
+## 2. Preparar o ambiente do firmware
+
+### 2.1 Instalar dependências do ESP-IDF
+
+No Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  git wget flex bison gperf \
+  python3 python3-pip python3-venv \
+  cmake ninja-build ccache \
+  libffi-dev libssl-dev \
+  dfu-util libusb-1.0-0
+```
+
+### 2.2 Instalar o ESP-IDF 5.5.5
+
+Crie uma pasta para o framework:
+
+```bash
+mkdir -p ~/esp
+cd ~/esp
+```
+
+Clone exatamente a versão utilizada pelo projeto:
+
+```bash
+git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git
+```
+
+Instale as ferramentas necessárias para ESP32-S3:
+
+```bash
+cd ~/esp/esp-idf
+./install.sh esp32s3
+```
+
+Ative o ambiente:
+
+```bash
+. ~/esp/esp-idf/export.sh
+```
+
+Confirme:
+
+```bash
 idf.py --version
-idf.py -B build -DIDF_TARGET=esp32s3 build
 ```
 
-Em outra instalação, ative o ambiente ESP-IDF 5.5.5 pelo script dessa instalação.
-Se já existir uma configuração para outro chip, execute `idf.py set-target esp32s3`
-antes do build (esse comando recria a configuração/build). As configurações locais
-Windows em `.vscode` e a imagem `latest` do devcontainer não fixam um ambiente
-reproduzível; a versão comprovada nesta etapa é a informada acima.
+O resultado deve indicar ESP-IDF 5.5.5.
 
-Com a placa conectada, identifique a porta em `ls /dev/serial/by-id/` ou
-`ls /dev/ttyACM* /dev/ttyUSB*`. Substitua `/dev/ttyACM0` pela porta correta:
+Sempre que abrir um novo terminal para trabalhar no firmware, ative novamente o ambiente com:
 
 ```bash
-idf.py -p /dev/ttyACM0 flash
-idf.py -p /dev/ttyACM0 monitor
+. ~/esp/esp-idf/export.sh
 ```
 
-Saia do monitor com **Ctrl+]**. O flash e os testes físicos não foram executados
-nesta revisão. Para salvar a sessão do ensaio, pode-se executar:
+### 2.3 Clonar o FlowCount
 
 ```bash
-mkdir -p output/tests
-idf.py -p /dev/ttyACM0 monitor 2>&1 | tee output/tests/etapa1-monitor.log
+cd ~/projetos
+git clone https://github.com/joaohenriquebitu/FlowCount.git
+cd FlowCount
 ```
 
-## Integração contínua (GitHub Actions)
+Caso o repositório ainda esteja em desenvolvimento por branches, utilize a branch que contém a versão atual do firmware e deste README.
 
-O workflow `.github/workflows/ci.yml` executa em pushes de qualquer branch,
-pull requests destinados à `main`, filas de merge e acionamento manual. Não há
-filtro por arquivos: alterações de documentação também produzem o check exigido.
+### 2.4 Selecionar o microcontrolador
 
-- **Host tests:** contador, relógio, fila e protocolo MQTT, com warnings tratados
-  como erros. A suíte roda sem sanitizadores e com AddressSanitizer,
-  UndefinedBehaviorSanitizer e detecção de vazamentos.
-- **ESP32-S3 build:** compila com ESP-IDF **5.5.5**, nos perfis de comunicação e
-  diagnóstico, usando configurações novas e sem credenciais. Verifica também os
-  módulos dependentes do SDK que os testes de host não executam.
-- **CI required:** só passa quando todas as variantes de testes e build passam;
-  falhas, cancelamentos ou jobs ignorados não aprovam esse check.
-
-### Exigir aprovação antes do merge
-
-O workflow, sozinho, não bloqueia merges. Após publicar esta alteração e executar
-a CI pela primeira vez, um administrador deve configurar a proteção da `main`
-em **Settings → Branches → Branch protection rule** (ou regra equivalente em
-**Rules → Rulesets**):
-
-1. Exigir pull request antes do merge.
-2. Ativar **Require status checks to pass before merging** e selecionar
-   **CI required**, com origem GitHub Actions.
-3. Exigir a branch atualizada com `main` antes do merge (ou usar fila de merge).
-4. Aplicar a regra também aos administradores e não permitir bypass, se a
-   exigência deve valer para todos.
-
-Essa configuração é feita no GitHub; não é ativada pela presença deste arquivo.
-Consulte a [documentação de proteção de branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
-
-### Executar a suíte completa localmente
-
-No Ubuntu/Debian, instale `build-essential`, `pkg-config` e `libcjson-dev`.
-Alternativamente, ative o ESP-IDF ou defina `CJSON_DIR` para a pasta que contém
-`cJSON.c` e `cJSON.h`. Os testes usam o parser cJSON real.
+Dentro do diretório do projeto:
 
 ```bash
-bash tests/run_tests.sh
-SANITIZE=1 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
-  UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 bash tests/run_tests.sh
+idf.py set-target esp32s3
 ```
 
-É possível escolher o compilador com `CC=gcc` ou `CC=clang`. Em ambientes sob
-`ptrace` que não suportam LeakSanitizer, use `ASAN_OPTIONS=detect_leaks=0` apenas
-na execução local. A CI mantém a detecção habilitada. Uma dependência ausente ou
-qualquer teste com falha encerra o script com erro, sem pular testes.
+O target deve permanecer `esp32s3`.
 
-Os cenários MQTT verificam payload UTC, tamanhos de buffer, identidade da sessão,
-ACKs malformados e fora dos limites, prefixos de tópico e prazos de reenvio. A
-integração da fila roda com comunicação, sem comunicação e com diagnóstico,
-verificando propriedade de acesso, retenção até ACK e estatísticas. Não simula
-uma conexão real Wi-Fi/MQTT nem substitui os ensaios físicos.
+## 3. Configurar o firmware
 
-## Ligação elétrica: confirmar antes do ensaio
-
-- Entrada de contagem: **GPIO 7**, com **presença em LOW (0)** e repouso em HIGH (1).
-- O firmware mantém pull-up e pull-down internos **desabilitados**, como antes.
-- É necessário garantir eletricamente o nível de repouso. O código anterior
-  mencionava resistor externo de **10 kΩ para 3,3 V**, mas sua instalação não foi
-  comprovada. Confirmar a compatibilidade com a saída do sensor e registrar o
-  valor efetivamente instalado; não presumir que o resistor já existe.
-- Documentar alimentação e tipo de saída do sensor, referência de GND comum e
-  adequação dos níveis ao GPIO de 3,3 V. Não aplicar diretamente ao GPIO a tensão
-  de alimentação do sensor sem verificar o circuito de interface.
-- Alimentar a placa por fonte conectada à tomada, conforme o escopo, sem bateria.
-- A montagem real, a alimentação do sensor e os níveis medidos continuam pendentes
-  de confirmação. Não deduzir a ligação apenas por cores de fios.
-
-## Como a contagem funciona
-
-`AGUARDAR LIVRE -> LIVRE -> CONFIRMAR PRESENÇA -> PRESENTE -> CONFIRMAR LIBERAÇÃO -> CONTAR / LIVRE`
-
-1. Ao iniciar, exige liberação estável. Uma peça já presente no boot não é contada
-   quando retirada; somente um ciclo iniciado depois de armar gera contagem.
-2. LOW inicia confirmação de presença; retorno a HIGH antes de confirmar cancela
-   essa tentativa. Toda atividade de borda reinicia o tempo de estabilidade.
-3. Presença confirmada permanece armada enquanto a peça estiver diante do sensor.
-4. HIGH inicia confirmação de liberação. Retorno a LOW cancela a liberação e
-   preserva a mesma passagem. Nova estabilidade em HIGH é necessária.
-5. Apenas a liberação confirmada incrementa o total, uma vez, e rearma a coleta.
-6. Presença lógica prolongada emite um aviso por episódio. Uma liberação curta não
-   resolve esse aviso. A liberação válida o encerra; se havia uma passagem armada,
-   ela gera uma única contagem. O aviso não indica defeito nem parada de máquina.
-
-A ISR nas duas bordas apenas marca uma flag de atividade protegida por spinlock.
-A tarefa existente `app_main` lê GPIO e consome essa flag em seção crítica curta.
-Não há logs, alocação nem contagem dentro da ISR. Não é necessário armazenar cada
-borda: mesmo várias oscilações entre amostras invalidam a estabilidade. Esta flag
-**não é a fila de eventos de produção**. A fila adicionada na Etapa 2 guarda
-passagens completas, não bordas ou notificações de GPIO.
-
-O módulo `main/src/counting/counter.c` contém a máquina de estados, sem dependência de ESP-IDF;
-o módulo `main/src/main.c` cuida de GPIO, tempo monotônico, execução periódica e logs.
-O estado da máquina e a geração das sequências são exclusivos de `app_main`.
-A Etapa 2 acrescenta uma fila e, opcionalmente, uma tarefa de diagnóstico.
-Falhas de configuração do GPIO/ISR usam `ESP_ERROR_CHECK`
-e interrompem a inicialização com diagnóstico, em vez de seguir contando.
-
-### Parâmetros iniciais (ajustáveis e ainda não calibrados)
-
-| Parâmetro | Local | Valor inicial |
-|---|---|---|
-| Presença estável | `main/include/counting/counter.h`: `COUNTER_PRESENCE_US` | 30 ms |
-| Liberação estável | `main/include/counting/counter.h`: `COUNTER_RELEASE_US` | 50 ms |
-| Presença prolongada | `main/include/counting/counter.h`: `COUNTER_BLOCKED_US` | 5 s |
-| Máxima lacuna de amostragem | `main/include/counting/counter.h`: `COUNTER_MAX_SAMPLE_GAP_US` | 100 ms |
-| Período da tarefa | `main/src/main.c`: `SENSOR_SAMPLE_MS` | 10 ms, no mínimo 1 tick |
-
-Os tempos são medidos com `esp_timer_get_time()` em microssegundos. O instante
-de confirmação da passagem é preservado como tempo monotônico complementar;
-o campo UTC separado depende da sincronização descrita na Etapa 3. O período é escalonado pelo FreeRTOS;
-nenhum delay isolado decide se uma peça é válida. Observe o período em ticks no
-log de inicialização ao mudar a frequência de tick do projeto.
-
-Presença e intervalo livre precisam durar mais que suas confirmações, com margem
-para a amostragem e escalonamento. Como ponto inicial de bancada, use LOW por pelo
-menos **50 ms** e HIGH por pelo menos **70 ms**, com tarefa regular de 10 ms, e
-meça esses tempos. Esses valores não são limites físicos já validados. A vazão de
-30 peças/minuto (uma a cada 2 s) não informa sozinha a duração do pulso do sensor.
-
-Se houver intervalo entre amostras maior que 100 ms, a máquina descarta o ciclo
-incerto, registra **possível perda** e exige nova liberação estável. Isso evita
-inventar contagem após uma lacuna; não recupera a passagem descartada. Qualquer
-aviso desse tipo deve ser investigado antes de aprovar um ensaio. Pulsos menores
-que o filtro, transições não capturadas pelo hardware e ruído que imita um ciclo
-válido não podem ser distinguidos com garantia de uma passagem física; a montagem
-elétrica e a calibração continuam necessárias.
-
-### Interpretação do monitor
-
-- `Coleta pronta: sensor livre.`: sistema armado para um novo ciclo.
-- `Passagem valida/evento enfileirado: ... total=N ...`: ciclo confirmado,
-  evento criado e copiado para a fila. Em lotação aparece `OVERFLOW evento perdido`,
-  também com `total`, `sequence` e `perdidos`; a contagem continua.
-- `Presenca prolongada: possivel sensor bloqueado.`: aviso após 5 s, uma vez por
-  episódio; não produz incremento nem rearma a passagem.
-- `Condicao de bloqueio encerrada: sensor liberado.`: liberação estável após aviso.
-- `Lacuna de amostragem: ciclo descartado; possivel perda.`: ensaio precisa de
-  investigação; aguardar novo log de coleta pronta para retomar.
-
-## Testes automatizados da lógica
-
-No diretório do projeto, com GCC instalado:
+Abra o menu de configuração:
 
 ```bash
-gcc -std=c11 -Wall -Wextra -Werror -pedantic -I main/include \
-  main/src/counting/counter.c tests/test_counter.c -o /tmp/flowcount-test-counter
-/tmp/flowcount-test-counter
-```
-
-O resultado esperado é `OK: 6 cenarios ...`, com saída de processo zero. Os testes
-cobrem limites exatos dos tempos, dez episódios de peça parada, ruído na entrada e
-saída (inclusive atividade entre amostras), partida ocupada, 200 ciclos simulados
-na cadência de 30/min e recuperação após lacuna de observação. Uma falha de
-asserção encerra o executável com erro.
-
-A revisão também executou AddressSanitizer e UndefinedBehaviorSanitizer sem
-achados. A detecção de vazamentos foi desativada porque LeakSanitizer não funciona
-no ambiente sob ptrace; a lógica não usa alocação dinâmica. Os testes de software
-não comprovam acurácia física nem o tempo de execução real da ISR/tarefa.
-
-## Procedimento de bancada
-
-1. **Preparar e registrar:** conferir ligação, fonte, repouso HIGH, sensor estável,
-   peças separadas e trajetória unidirecional. Preencher a ficha abaixo, compilar,
-   gravar e abrir o monitor. Esperar `Coleta pronta` antes de iniciar a medição.
-2. **Passagem normal:** executar dez ciclos separados. Ao inserir a peça, o total
-   não deve subir. Após retirar e confirmar liberação, deve subir exatamente um.
-3. **Peça parada:** inserir uma peça e mantê-la por pelo menos 6 s. Esperar um aviso
-   de bloqueio e nenhum incremento enquanto estiver presente. Retirar e verificar
-   uma contagem e encerramento do aviso. Repetir dez vezes. Dar uma liberação breve
-   inferior a 50 ms em um ensaio controlado: não deve contar nem resolver o aviso.
-4. **Ruído controlado:** usando gerador/simulador compatível com a entrada de 3,3 V
-   e com o sensor desconectado da saída do gerador, aplicar pulsos LOW de 10 ms
-   separados por HIGH de 100 ms: zero contagens. Depois confirmar LOW por 100 ms,
-   aplicar liberações HIGH de 10 a 20 ms intercaladas com LOW e finalizar com HIGH
-   por pelo menos 70 ms: exatamente uma contagem ao final. Osciloscópio/analisador
-   lógico ajuda a confirmar os tempos; movimento manual não prova pulsos de 10 ms.
-5. **Sequência e acurácia:** executar 200 passagens observadas independentemente,
-   registrando perdas e extras separadamente. Incluir fluxo de até 30/minuto, com
-   duração medida de presença e liberação dentro das margens calibradas. Para um
-   ensaio completo de 200 peças a 30/minuto, prever aproximadamente 6 min 40 s.
-6. **Partida ocupada:** ligar/reiniciar com uma peça presente; após 5 s deve avisar
-   bloqueio. Retirá-la não conta. Após `Coleta pronta`, o próximo ciclo conta uma.
-
-Não use somente a diferença entre total observado e total esperado: uma perda e
-uma contagem extra podem se anular. Correlacione as passagens individualmente com
-os logs ou com vídeo/observação independente.
-
-### Ficha mínima de ensaio
-
-| Campo | Valor a registrar |
-|---|---|
-| Data, revisão do código e ESP-IDF | Pendente |
-| GPIO, alimentação, interface e resistor externo | Pendente |
-| Níveis medidos: livre / presença | Pendente |
-| Posição, distância e fixação do sensor | Pendente |
-| Velocidade e espaçamento entre peças | Pendente |
-| Duração medida de LOW / HIGH | Pendente |
-| Peças: material, cor, brilho e dimensões | Pendente |
-| Iluminação e vibração | Pendente |
-| Filtro de presença / liberação / bloqueio e tick | Pendente |
-| Passagens observadas / perdas / extras | Pendente |
-| Avisos de lacuna, logs e evidências | Pendente |
-
-### Critérios para concluir a Etapa 1
-
-- Build ESP32-S3 e testes automatizados passam.
-- Pelo menos 200 passagens físicas, com **no máximo quatro erros somados** entre
-  perdas e extras, nas condições registradas (meta de acurácia de 98%).
-- Dez ensaios de peça parada sem contagens durante a presença; uma contagem por
-  ciclo completo, com aviso de bloqueio e recuperação coerentes.
-- Ensaios de ruído abaixo dos tempos de confirmação não geram contagens falsas.
-- Fluxo até 30/min validado dentro da meta, sem lacunas de amostragem inexplicadas.
-- Registro da montagem, calibração e evidências preenchido e reproduzível.
-
-**Situação:** build e testes da lógica aprovados; critérios físicos pendentes.
-A estrutura de eventos e fila já foi adicionada por solicitação explícita na
-Etapa 2, descrita a seguir; isso não substitui a validação física da Etapa 1.
-
-## Etapa 2: eventos e fila de contingência
-
-### Modelo de dados e identidade
-
-`main/include/counting/production_event.h` define o formato atual de **48 bytes**, ampliado dos
-40 bytes da Etapa 2 para incluir UTC na Etapa 3. Não há ponteiros, strings longas
-nem alocação por passagem:
-
-```c
-typedef struct {
-    uint64_t sequence;
-    int64_t occurred_at_us;
-    int64_t timestamp_ms;
-    uint8_t session[16];
-    uint32_t station;
-    uint32_t clock_synced;
-} production_event_t;
-```
-
-- `station`: identidade centralizada em `menuconfig`, padrão 1; configurar um
-  número distinto para cada estação.
-- `session`: 128 bits aleatórios gerados no boot com `bootloader_random_enable()`,
-  `esp_fill_random()` e `bootloader_random_disable()`, antes de qualquer ADC/RF.
-  Unicidade probabilística, dependente da entropia, não garantia matemática. Não
-  exige rede, relógio civil ou NVS. É exibida como 32 dígitos hexadecimais.
-- `sequence`: 64 bits sem sinal, desde 1; também é o total da sessão. Somente
-  passagens confirmadas criam eventos. O limite é verificado antes de incrementar.
-- `occurred_at_us`: microssegundos monotônicos na confirmação da liberação,
-  mantidos para diagnóstico e medição mesmo sem UTC.
-- `timestamp_ms`: Unix UTC em milissegundos, com sinal e 64 bits; zero se inválido.
-- `clock_synced`: 0 ou 1, indicando a qualidade do UTC na criação. Substitui o
-  antigo `time_source`; são 32 bits para manter alinhamento explícito. Um `bool`
-  não reduziria o tamanho total com o alinhamento atual.
-
-A identidade permanece `(station, session, sequence)`. O timestamp não participa
-da identidade. A sessão muda e a fila é perdida a cada reboot. Essa estrutura em
-RAM não é formato de transporte; serialização será definida posteriormente.
-Os campos temporais de cada evento são imutáveis após a criação. A estratégia
-de UTC e as limitações antes da sincronização estão na seção da Etapa 3.
-
-### Produtor, armazenamento e overflow
-
-`app_main` chama `production_events_init()` antes de habilitar a coleta. Essa
-inicialização cria a fila por `xQueueCreate()` e verifica falhas. A criação de cada
-evento ocorre exclusivamente no ramo `COUNTER_COUNT`; não há alteração no módulo
-`counter.c` ou na ISR da Etapa 1.
-
-A fila copia `production_event_t` por valor. `xQueueSend(..., 0)` não espera espaço,
-não sobrescreve eventos e tem o retorno verificado em todas as passagens. A fila
-padrão tem **72 posições**, 20% de margem sobre 60, ou **144 segundos a 30/min**.
-Sem consumidor, ela eventualmente lota mesmo sem existir qualquer falha de rede.
-
-Quando cheia, a política é **descartar o novo evento**, mantendo os anteriores:
-
-1. Criar o evento e atribuir uma nova identidade, aumentando o total local.
-2. Tentar inserir sem espera.
-3. Se falhar, incrementar `perdidos` e imprimir `OVERFLOW` com a identidade,
-   timestamp, total e ocupação. A tarefa continua detectando peças.
-
-É uma perda explícita do registro em RAM, não uma recuperação automática. Com
-memória finita e sem consumidor, não é possível manter todos os eventos e contar
-indefinidamente. Não se reutiliza a sequência rejeitada: se 73 e 74 forem perdidos,
-o próximo evento será 75, mesmo que já exista espaço. Assim `total = eventos
-aceitos desde o boot + perdidos`; a ocupação atual também depende do consumo.
-`perdidos` mede apenas overflow da fila; lacunas de amostragem continuam com o
-seu diagnóstico próprio na Etapa 1, sem inventar quantidade de peças perdidas.
-
-O retorno `ESP_ERR_NO_MEM` de `production_events_record()` identifica esse overflow
-esperado. `app_main` continua porque o módulo já registrou a perda. Erros de uso
-(tarefa errada, tempo inválido ou sequência esgotada) interrompem a operação via
-`ESP_ERROR_CHECK`, pois continuar comprometeria a identidade das passagens.
-
-### Configuração e consumidor de diagnóstico
-
-Execute `idf.py menuconfig` e abra **FlowCount - eventos de producao**:
-
-| Opção | Padrão | Finalidade |
-|---|---|---|
-| `FLOWCOUNT_STATION_ID` | 1 | Identidade centralizada da estação |
-| `FLOWCOUNT_EVENT_QUEUE_CAPACITY` | 72 | Capacidade da fila, mínimo 60 |
-| `FLOWCOUNT_DIAGNOSTIC_CONSUMER` | Desabilitado | Remover e imprimir eventos para teste |
-| `FLOWCOUNT_DIAGNOSTIC_DELAY_SECONDS` | 0 | Atraso inicial do consumidor quando habilitado |
-
-As definições e padrões ficam em `main/Kconfig.projbuild`; seleções locais ficam em
-`sdkconfig` (ignorado pelo Git). Registre essas seleções na ficha do ensaio. Refaça
-build/flash após mudar opções; o reboot cria outra sessão e perde a fila anterior.
-
-- **Sem consumidor (padrão):** os eventos permanecem na fila até lotar, desligar ou
-  reiniciar. Nada os remove automaticamente.
-- **Consumidor habilitado, atraso 0:** uma tarefa `event_diag` retira via
-  `xQueueReceive()` e imprime todos os campos. Pode retirar antes do log do
-  produtor; por isso `queue=0/72` após um envio bem-sucedido e ordem intercalada de
-  logs são normais. O valor de ocupação é uma fotografia, não um contador acumulado.
-- **Consumidor habilitado, atraso 180 s:** permite encher a fila e depois observar
-  sua drenagem na mesma sessão, com timestamps e ordem originais.
-
-O consumidor é **destrutivo e somente de diagnóstico**: remove imediatamente ao
-receber, antes de imprimir, sem transmitir ou persistir. Um evento retirado só
-existirá na cópia local da tarefa e eventualmente no log capturado; não há
-confirmação de entrega. A política de remoção confiável para a comunicação futura
-não foi implementada e não deve usar esse consumo de teste inadvertidamente.
-
-### Concorrência, inicialização e memória
-
-- A tarefa que inicializa é a única autorizada a produzir; o handle é conferido
-  em cada chamada. Total/sequência e perdas são lidos/escritos apenas por ela.
-- A ISR continua marcando somente a flag protegida por spinlock. Nenhuma API de
-  produção é chamada em interrupção; não se usa `FromISR` para os eventos.
-- O diagnóstico recebe cópias completas pela fila FreeRTOS e não lê os contadores
-  de 64 bits do produtor. A sincronização da fila é responsabilidade do FreeRTOS.
-- Não se mantém spinlock durante envio, logs ou esperas. Só o consumidor espera
-  eventos; o produtor usa espera zero. Os logs seriais ainda têm custo de execução,
-  a observar nos ensaios e no diagnóstico de lacunas da Etapa 1.
-- Se a fila não puder ser criada, a coleta não começa. Se a tarefa opcional não
-  puder ser criada, a fila é liberada e a inicialização falha com log claro.
-- `sizeof(production_event_t) = 48`, confirmado por `_Static_assert` no build real.
-  **48 × 72 = 3.456 bytes (3,375 KiB)** de dados, mais controle da fila e overhead
-  do alocador. Há somente alocação inicial da fila, não por evento.
-- Com diagnóstico habilitado, adicionar **4.096 bytes de stack** mais o controle
-  da tarefa. Esse custo é pequeno para o ESP32-S3, mas deve ser reavaliado quando
-  outros subsistemas forem integrados. Fila, total, sessão e perdas são voláteis.
-
-### Testes automatizados da Etapa 2
-
-No diretório do projeto:
-
-```bash
-bash tests/run_tests.sh
-```
-
-O script executa a regressão da Etapa 1 e duas variantes do módulo de eventos
-(consumidor habilitado/desabilitado), com `-Wall -Wextra -Werror -pedantic`.
-Os testes de eventos usam um adaptador de fila/tarefas/RNG somente no host; esse
-adaptador não entra no firmware. Exercitam o código real de eventos integrado à
-máquina de estados: ruído, peça parada, FIFO de 72 cópias, dois overflows sem
-sobrescrita, preservação de tempos/identidade, retomada na sequência 75, mil ciclos
-de produção/consumo e rejeição de produtor errado. Injetam falhas de criação da
-fila e tarefa e verificam a liberação dos recursos e a desativação da entropia.
-
-Opcionalmente, em ambiente compatível com sanitizers:
-
-```bash
-ASAN_OPTIONS=detect_leaks=0 SANITIZE=1 bash tests/run_tests.sh
-```
-
-A opção `detect_leaks=0` contorna a incompatibilidade do LeakSanitizer com o ptrace
-neste ambiente; AddressSanitizer e UndefinedBehaviorSanitizer permanecem ativos.
-Esses testes não simulam o escalonamento real, não validam a qualidade do RNG
-físico nem substituem os testes com a fila FreeRTOS na placa.
-
-### Execução e testes de bancada A-E
-
-```bash
-cd /home/irlan-barros/projetos/FlowCount
-source /home/irlan-barros/.espressif/tools/activate_idf_v5.5.5.sh
 idf.py menuconfig
-idf.py -B build -DIDF_TARGET=esp32s3 build
+```
+
+Configure as seções `FlowCount`.
+
+### 3.1 Eventos de produção
+
+Defina pelo menos:
+
+```text
+Station ID: 1
+Bancada: B01
+Event queue capacity: 72
+```
+
+Se houver várias estações, cada ESP32 deve possuir identificação coerente com a bancada física correspondente.
+
+### 3.2 Horário
+
+A configuração padrão utiliza:
+
+```text
+NTP server: pool.ntp.org
+Clock max age: 86400 s
+```
+
+O ESP32 precisa de um horário válido para gerar eventos com timestamp adequado para o servidor.
+
+### 3.3 Wi-Fi
+
+Preencha:
+
+```text
+Wi-Fi SSID: <nome-da-rede>
+Wi-Fi password: <senha-da-rede>
+```
+
+A rede precisa permitir que a Heltec alcance o endereço da Raspberry Pi.
+
+### 3.4 MQTT
+
+Configure o broker usando o IP da Raspberry:
+
+```text
+MQTT URI: mqtt://<ip-da-raspberry>:1883
+```
+
+Exemplo:
+
+```text
+mqtt://192.168.1.50:1883
+```
+
+Usuário e senha MQTT podem permanecer vazios enquanto o Mosquitto estiver configurado para acesso anônimo no ambiente de desenvolvimento. Para implantação real, configure autenticação nos dois lados.
+
+### 3.5 Buzzer
+
+A configuração atual usa:
+
+```text
+GPIO: 45
+Frequência: 2400 Hz
+```
+
+O GPIO deve comandar o transistor do circuito, não alimentar diretamente o buzzer.
+
+### 3.6 Salvar
+
+Salve as opções no `menuconfig` e saia.
+
+O ESP-IDF gerará um `sdkconfig` local. Esse arquivo contém configurações da máquina e pode conter credenciais de rede. Ele não deve ser enviado para repositórios públicos.
+
+## 4. Compilar e gravar a Heltec
+
+### 4.1 Compilar
+
+```bash
+idf.py build
+```
+
+Ao final, a compilação deve terminar sem erros.
+
+### 4.2 Conectar a placa
+
+Conecte a Heltec ao computador utilizando um cabo USB com suporte a dados.
+
+No Linux, procure a porta serial:
+
+```bash
+ls /dev/serial/by-id/
+```
+
+ou:
+
+```bash
+ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+```
+
+Exemplo de porta:
+
+```text
+/dev/ttyACM0
+```
+
+Se houver problema de permissão serial, adicione seu usuário ao grupo apropriado:
+
+```bash
+sudo usermod -aG dialout $USER
+```
+
+Depois, encerre a sessão do usuário e entre novamente.
+
+### 4.3 Gravar o firmware
+
+Substitua a porta pelo dispositivo encontrado:
+
+```bash
 idf.py -p /dev/ttyACM0 flash
+```
+
+### 4.4 Abrir o monitor serial
+
+```bash
 idf.py -p /dev/ttyACM0 monitor
 ```
 
-Substitua a porta pela real. Confirme a ligação descrita acima e espere `Coleta
-pronta` antes do primeiro ciclo. O log inicial mostra estação, sessão, tamanho e
-capacidade. Salve logs e seleções de configuração. A sequência reinicia a cada boot.
+Também é possível gravar e abrir o monitor em um único comando:
 
-**A - Passagem única:** use consumidor desabilitado e fila vazia. Execute um ciclo
-completo. Espere um único log `evento enfileirado`, `sequence=1`, `total=1`,
-`queue=1/72`, `perdidos=0`, `mono_us` positivo. No firmware atual sem rede, esperar `timestamp_ms=0` e
-`clock_synced=0`; isso não é falha da contagem. A inserção da
-peça sozinha não deve gerar evento; a liberação confirmada gera exatamente um.
-
-**B - Peça parada:** mantenha a peça por pelo menos seis segundos. Espere aviso
-de bloqueio e nenhuma sequência adicional. Ao liberar corretamente, espere apenas
-um evento. Repetir dez vezes e verificar também a recuperação do bloqueio.
-
-**C - Passagens sucessivas:** execute dez ciclos separados. Confira sequências
-consecutivas, mesma estação/sessão e `mono_us` crescente. UTC só é válido com
-`clock_synced=1`. Depois habilite o
-consumidor com atraso zero, recompile e grave: em uma nova sessão, cada identidade
-aceita deve aparecer uma vez em `DIAG removido (nao persistido)`, com timestamp
-idêntico ao do produtor. Registre a ordem por sequência, não pela ordem das linhas
-intercaladas das tarefas. Não deve haver overflow nesse ensaio controlado.
-
-**D - Capacidade/overflow:** consumidor desabilitado, nova sessão, gerar 74 ciclos.
-Os primeiros 72 ocupam 1/72 até 72/72. O 73º e 74º devem imprimir `OVERFLOW`,
-`total=73`/`74`, `perdidos=1`/`2`, mantendo 72 registros. Continuar passando peças
-não pode causar reset nem sobrescrita silenciosa.
-
-Para verificar recuperação sem reiniciar, faça outro ensaio com consumidor
-habilitado e atraso inicial 180 s: produza 74 ciclos em aproximadamente 148 s a
-30/min, iniciando logo após armar. Pause as peças até drenar. Confira que o
-consumidor retira somente 1 a 72, com tempos originais; 73 e 74 foram explicitamente
-perdidos. Passe outra peça após a drenagem: deve produzir 75, com `perdidos=2`.
-Se o tempo de preparação impedir encher a fila, aumente o atraso configurado e
-registre o valor. Não reinicie entre enchimento e drenagem.
-
-**E - Memória/estabilidade:** consumidor habilitado, atraso zero, realizar pelo
-menos 200 ciclos a até 30/min (aproximadamente 6 min 40 s). Conferir 200 eventos e
-200 consumos únicos, `perdidos=0`, sem watchdog, resets ou lacunas inexplicadas.
-Repetir com consumidor desabilitado por mais de 72 ciclos: devem existir somente
-os overflows explícitos previstos. Uma sessão inesperadamente nova no meio do
-ensaio evidencia reinício e invalida a continuidade do teste. Registrar qualquer
-anomalia, logs completos, parâmetros e montagem; a observação no host não comprova
-estabilidade de memória ou tempo real na placa.
-
-### Situação e limite da entrega
-
-A Etapa 2 implementa somente `detecção -> evento -> fila RAM`, com diagnóstico
-opcional. Os testes automatizados passaram; a validação física A-E permanece
-pendente. Os números de acurácia da Etapa 1 continuam dependentes da bancada.
-O módulo temporal da Etapa 3 foi acrescentado conforme a seção abaixo. A
-sincronização pela rede continua dependente da futura conectividade.
-
-## Etapa 3: UTC dos eventos e sincronização SNTP
-
-### Decisão de escopo e integração futura
-
-Não existia Wi-Fi no repositório. Foi implementado `main/src/time/app_time.c` com a API
-`esp_netif_sntp_init()` do **ESP-IDF 5.5.5**, sem adicionar camada de conexão ou
-credenciais. `app_time_init()` inicializa somente o estado local e permite coletar
-imediatamente. **No firmware atual o SNTP ainda não inicia**, pois não há rede.
-Configurar o servidor em menuconfig não conecta a placa por si só.
-
-Na Etapa 4, o responsável pela rede deverá inicializar ESP-NETIF e obter um IP.
-Então, em contexto de tarefa, deverá chamar `app_time_start_sntp()` e verificar o
-retorno, mantendo a coleta ativa mesmo se essa chamada falhar. A inicialização é
-idempotente após sucesso, e uma falha permite nova tentativa pelo gestor de rede.
-Não chamar essa função antes de inicializar a pilha de rede, nem dentro de ISR.
-O módulo deve ser o único proprietário do cliente SNTP do SDK.
-
-A configuração é centralizada em **FlowCount - horario dos eventos**:
-
-| Opção | Padrão | Significado |
-|---|---|---|
-| `FLOWCOUNT_NTP_SERVER` | `pool.ntp.org` | Nome/IP do servidor; pode ser o NTP da Raspberry Pi |
-| `FLOWCOUNT_CLOCK_MAX_AGE_SECONDS` | 86400 (24 h) | Validade máxima da última referência aceita |
-
-A resincronização é a normal do lwIP/SNTP, configurada por
-`CONFIG_LWIP_SNTP_UPDATE_DELAY`, atualmente **3.600.000 ms (1 h)**. Não há loop de
-consultas manual. A validade máxima deve ser maior que esse intervalo. Servidor
-vazio ou combinação inválida de tempos gera diagnóstico e mantém a coleta sem UTC.
-A indisponibilidade de NTP nunca provoca espera da contagem nem reinício deliberado.
-
-### Como o instante da ocorrência recebe UTC
-
-1. A máquina de estados mantém os filtros baseados exclusivamente em
-   `esp_timer_get_time()`.
-2. O instante monotônico passado a `counter_update()` é mantido quando a função
-   confirma a liberação. O evento é criado nessa mesma iteração, antes dos logs.
-3. O callback de sincronização SNTP lê `gettimeofday()` e forma uma referência
-   pareada UTC/monotônico. Apenas esse callback pode habilitar o estado sincronizado;
-   uma data plausível no relógio de sistema, sozinha, não habilita UTC.
-4. A referência é copiada sob seção crítica curta. O módulo calcula o UTC da
-   ocorrência a partir da diferença monotônica desde essa referência e armazena
-   o valor no evento antes de `xQueueSend()`.
-5. O consumidor somente lê os campos já armazenados. Nunca consulta o relógio
-   para substituir ou reconstruir o timestamp de um evento existente.
-
-Isso relaciona o UTC ao instante confirmado da passagem, não à hora dos logs ou
-consumo. Como na Etapa 1, o instante inclui a confirmação de liberação (50 ms por
-padrão) e a amostragem; não representa exatamente a primeira borda elétrica.
-
-`timestamp_ms` é um inteiro de 64 bits em **milissegundos desde a época Unix UTC**.
-Oito bytes oferecem ampla capacidade para datas futuras e resolução mais útil
-que segundos para eventos próximos. A resolução de 1 ms não significa exatidão
-física de 1 ms: há incerteza de rede, amostragem, pareamento e deriva do oscilador.
-O pareamento usa o ponto médio das leituras monotônicas antes/depois de
-`gettimeofday()`; uma janela maior que 10 ms é rejeitada como referência imprecisa.
-Datas anteriores a 2020, campos inválidos e falha de leitura também são rejeitados.
-
-O estado é consultável por `app_time_is_synchronized()`. Os logs de sincronização
-usam `gmtime_r()` e sufixo `Z`; não é necessário definir TZ para armazenar ou exibir
-UTC. A conversão para horário brasileiro ficará na futura apresentação dos dados.
-
-### Antes de sincronizar, após expirar e ao resincronizar
-
-Sem referência SNTP aceita, cada passagem continua gerando identidade, sequência
-e evento. São gravados `timestamp_ms=0`, `clock_synced=0` e `occurred_at_us` válido.
-**Zero é sentinela de UTC inválido, não uma produção em 1970.** Os eventos antigos
-permanecem assim mesmo quando o relógio sincroniza depois. Não há reconstrução
-retroativa, descarte por falta de horário ou alteração da identidade.
-
-Após sincronizar, novos eventos terão `clock_synced=1`. Sem novas respostas SNTP,
-a referência continua sendo extrapolada pelo relógio monotônico por até 24 h;
-esse período admite deriva e é uma política inicial ajustável, não uma exatidão
-já medida. Após a validade configurada, novas capturas retornam UTC inválido.
-Os eventos já criados mantêm a qualidade e o timestamp registrados originalmente.
-
-A sincronização usa ajuste imediato (`smooth_sync=false`). Uma correção do horário
-pode fazer o UTC de novos eventos avançar ou retroceder; a sequência continua
-crescendo e é a referência de ordenação da sessão. Não se força monotonicidade do
-UTC criando horários artificiais. Se uma atualização ocorrer entre a confirmação
-e a captura e a ocorrência ficar anterior à referência recém-aceita, o módulo
-marca esse evento conservadoramente como não sincronizado. Não tenta reconstruí-lo.
-
-No reboot, o estado temporal começa novamente não sincronizado, mesmo que o RTC
-mantenha uma data plausível. A sessão muda e a fila em RAM é perdida como antes.
-
-### Concorrência, erros e logs
-
-A tarefa produtora consulta o relógio, enquanto o callback do SNTP atualiza a
-referência no contexto de rede. UTC, monotônico e validade são copiados juntos sob
-`portMUX_TYPE`; isso também protege os campos de 64 bits no ESP32-S3. Não se usa
-apenas `volatile`. Leituras de sistema, inicialização SNTP, formatação e logs ficam
-fora da seção crítica. A ISR do sensor permanece inalterada.
-
-`app_time_poll()` é chamado exclusivamente por `app_main`, limita suas verificações
-a uma vez por segundo e emite diagnósticos de transição. Ele não espera horário
-nem realiza consultas de rede. A inicialização SNTP usa `wait_for_sync=false`.
-Falha de inicialização retorna erro com log; ausência de resposta por 60 s gera um
-aviso único até recuperação. Uma referência inválida ou vencida degrada o UTC,
-sem bloquear os eventos ou apagar dados da fila.
-
-Logs esperados:
-
-```text
-CLOCK_UNSYNCED: aguardando conectividade; UTC invalido ate SNTP
-... mono_us=... timestamp_ms=0 clock_synced=0 ...
+```bash
+idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-Somente após a futura ativação com rede:
+Para sair do monitor do ESP-IDF:
 
 ```text
-SNTP iniciado: servidor=... intervalo=3600000 ms; sem espera da coleta
-CLOCK_SYNCED UTC=...Z unix_ms=...
-... mono_us=... timestamp_ms=... clock_synced=1 ...
+Ctrl + ]
 ```
 
-### Memória e verificação automatizada
+## 5. Verificar o sistema completo
 
-| Medida | Etapa 2 anterior | Etapa 3 atual | Aumento |
-|---|---:|---:|---:|
-| `sizeof(production_event_t)` | 40 bytes | 48 bytes | 8 bytes |
-| Dados de 72 eventos | 2.880 bytes | 3.456 bytes | 576 bytes |
+Depois que o servidor estiver ativo e o firmware estiver gravado:
 
-A fila mantém a capacidade e política de overflow. O módulo acrescenta também
-algumas dezenas de bytes de estado estático. Os recursos da pilha de rede/SNTP,
-quando ativados, são adicionais e não estão incluídos nessa conta do payload.
-Nenhuma nova tarefa de relógio da aplicação foi criada. O consumidor opcional
-continua com stack de 4.096 bytes mais seu controle.
+1. confirme que a Raspberry Pi está ligada e conectada à rede;
+2. confirme que os containers estão ativos com `docker compose ps`;
+3. ligue a estação FlowCount;
+4. acompanhe o monitor serial do ESP32;
+5. aguarde a conexão Wi-Fi;
+6. aguarde a inicialização da comunicação e a sincronização de horário;
+7. passe uma peça pelo sensor e retire-a completamente da região de detecção;
+8. confirme a sinalização local da contagem;
+9. abra `http://<ip-da-raspberry>:3000`;
+10. acesse o dashboard do projeto;
+11. verifique se a nova passagem aparece nos indicadores de produção.
 
-Execute `bash tests/run_tests.sh`. Além das regressões, os testes agora exercitam
-o módulo real de relógio com APIs de rede/tempo simuladas: boot, data plausível sem
-sincronização, falha/repetição de inicialização SNTP, aviso de demora, sincronização,
-quantização em ms, expiração e recuperação, correção para trás, referência inválida
-e janela de leitura excessiva. Os testes integrados guardam eventos sem/com UTC,
-simulam 30 segundos de espera e uma resincronização antes do consumo: todos os
-campos originais permanecem intactos. O adaptador de testes não entra no firmware.
-Esses resultados não validam rede, servidor NTP, latência ou precisão do hardware.
+Se o ESP32 contar localmente, mas o Grafana não atualizar, faça o diagnóstico por camadas:
 
-### Roteiro de bancada A-F
+```text
+Sensor -> ESP32 -> Wi-Fi -> Mosquitto -> Telegraf -> InfluxDB -> Grafana
+```
 
-Ative o ambiente e compile conforme os comandos do início do README. Identifique
-a porta com `ls /dev/serial/by-id/` ou a ferramenta do sistema; não suponha que ela
-seja `/dev/ttyACM0`. Use `idf.py -p PORTA_REAL flash monitor`, substituindo o nome.
-**Nenhuma porta serial estava disponível durante esta implementação.**
+Não altere vários componentes ao mesmo tempo. Primeiro confirme onde o evento deixa de aparecer e então consulte a documentação específica daquele módulo.
 
-| Teste | Como executar e interpretar |
-|---|---|
-| **A - Boot sem sincronização** | Iniciar e passar peças. Esperar `CLOCK_UNSYNCED`, sequência crescente, UTC zero/flag 0 e tempo monotônico crescente. Nenhum bloqueio da coleta. Executável agora. |
-| **B - Sincronização normal** | Após integração da rede, obter IP e chamar `app_time_start_sntp()`. Esperar início e `CLOCK_SYNCED`; comparar UTC com fonte de horário confiável. Depende da Etapa 4. |
-| **C - Evento sincronizado** | Após B, passar uma peça. Esperar `clock_synced=1`; converter o Unix ms para UTC e comparar com o instante observado da liberação confirmada. Registrar diferença, sem alegar precisão não medida. |
-| **D - Vários eventos** | Conferir sequências e `mono_us` crescentes; com relógio estável, UTC acompanha as passagens. Correções SNTP podem alterar a ordem UTC de novos eventos, sem alterar a sequência ou os antigos. |
-| **E - Consumo atrasado** | Habilitar diagnóstico com atraso, por exemplo 60 s. Criar evento cedo e observar sua retirada pelo menos 30 s depois, na mesma sessão. Comparar `mono_us`, `timestamp_ms` e `clock_synced` por identidade: devem ser idênticos. Hoje valida também UTC inválido; repetir com UTC real após B. |
-| **F - Reboot** | Reiniciar: nova sessão, sequência reiniciada, UTC inválido até nova sincronização. Executável agora para o estado inicial; repetir obtenção do UTC após B. |
+## Configurações principais
 
-Para verificar expiração, após haver rede funcional configure uma validade maior
-que o intervalo SNTP, sincronize, bloqueie o acesso ao servidor e aguarde o prazo.
-Novos eventos devem retornar à flag 0; antigos não mudam. Em ensaio acelerado,
-reduza também o intervalo SNTP respeitando os limites do SDK e restaure os padrões
-ao terminar. Não habilite um consumidor destrutivo se precisar manter os registros
-na RAM; ele serve somente à validação e não comprova entrega a servidor.
+Os parâmetros abaixo estão definidos em `main/Kconfig.projbuild`.
 
-### Status da Etapa 3
+| Configuração | Padrão | Uso |
+|---|---:|---|
+| `FLOWCOUNT_STATION_ID` | `1` | Identificador numérico da estação |
+| `FLOWCOUNT_EVENT_QUEUE_CAPACITY` | `72` | Quantidade de eventos mantidos temporariamente em RAM |
+| `FLOWCOUNT_BANCADA` | `B01` | Nome lógico da bancada |
+| `FLOWCOUNT_NTP_SERVER` | `pool.ntp.org` | Fonte de sincronização de horário |
+| `FLOWCOUNT_CLOCK_MAX_AGE_SECONDS` | `86400` | Tempo máximo de validade da referência de horário |
+| `FLOWCOUNT_COMM_ENABLED` | `y` | Habilita comunicação do nó |
+| `FLOWCOUNT_WIFI_SSID` | vazio | Nome da rede Wi-Fi |
+| `FLOWCOUNT_WIFI_PASSWORD` | vazio | Senha da rede Wi-Fi |
+| `FLOWCOUNT_MQTT_URI` | vazio | Endereço do broker MQTT |
+| `FLOWCOUNT_MQTT_USERNAME` | vazio | Usuário MQTT, quando aplicável |
+| `FLOWCOUNT_MQTT_PASSWORD` | vazio | Senha MQTT, quando aplicável |
+| `FLOWCOUNT_WIFI_RETRY_SECONDS` | `5` | Intervalo entre tentativas de reconexão Wi-Fi |
+| `FLOWCOUNT_BUZZER_GPIO` | `45` | GPIO que comanda o circuito do buzzer |
+| `FLOWCOUNT_BUZZER_FREQUENCY_HZ` | `2400` | Frequência de PWM do buzzer |
 
-**Parcialmente concluída.** Modelo temporal, captura antes da fila, marcação de
-UTC inválido, referência sincronizada thread-safe, SNTP preparado e testes estão
-implementados. A sincronização real e os testes B/C (e partes sincronizadas de D-F)
-dependem da futura conectividade e da bancada. Não foi implementado Wi-Fi, MQTT ou
-backend, e não foi afirmado que o horário real já foi validado no ESP32-S3.
+O `Kconfig` também possui opções reservadas para prefixo de tópico, heartbeat e timeout de ACK. Na versão atual analisada, essas opções não representam integralmente o fluxo ativo de publicação e não devem ser tratadas como interface estável até que a documentação do módulo de comunicação seja concluída.
+
+## Fluxo completo de execução
+
+O diagrama abaixo apresenta o fluxo funcional do sistema sem entrar nos detalhes internos da máquina de estados de contagem ou do protocolo MQTT.
+
+```mermaid
+flowchart TD
+    BOOT(["Energização da estação"])
+    INIT_TIME["Inicializar relógio"]
+    INIT_SIGNAL["Inicializar buzzer"]
+    INIT_QUEUE["Criar sessão e fila de eventos"]
+    INIT_SENSOR["Configurar sensor no GPIO 7"]
+    INIT_NET["Inicializar Wi-Fi e comunicação"]
+    WAIT["Executar ciclo periódico de leitura"]
+
+    BOOT --> INIT_TIME --> INIT_SIGNAL --> INIT_QUEUE --> INIT_SENSOR --> INIT_NET --> WAIT
+
+    WAIT --> READ["Ler estado atual do sensor"]
+    READ --> VALIDATE["Validar a passagem"]
+
+    VALIDATE -->|"Nenhuma passagem concluída"| WAIT
+    VALIDATE -->|"Passagem válida"| EVENT["Criar evento de produção"]
+
+    EVENT --> STORE["Adicionar evento à fila em RAM"]
+    EVENT --> BEEP["Gerar sinalização sonora"]
+    BEEP --> WAIT
+
+    INIT_NET --> WIFI{"Wi-Fi conectado?"}
+    WIFI -->|"Não"| RETRY["Aguardar e tentar reconectar"]
+    RETRY --> WIFI
+    WIFI -->|"Sim"| TIME_SYNC["Iniciar sincronização SNTP"]
+    WIFI -->|"Sim"| MQTT_START["Iniciar cliente MQTT"]
+
+    TIME_SYNC --> CLOCK{"Horário válido?"}
+    CLOCK -->|"Não"| WAIT
+    CLOCK -->|"Sim"| WAIT
+
+    STORE --> DELIVERY{"Servidor alcançável e\ncomunicação disponível?"}
+    DELIVERY -->|"Não"| KEEP["Manter evento pendente em RAM"]
+    KEEP --> DELIVERY
+    DELIVERY -->|"Sim"| CHECK_TIME{"Evento possui\ntimestamp válido?"}
+    CHECK_TIME -->|"Não"| INVALID["Evento não segue para o servidor"]
+    CHECK_TIME -->|"Sim"| PUB["Publicar evento"]
+
+    PUB --> MOSQ["Mosquitto\nRaspberry Pi"]
+    MOSQ --> TELE["Telegraf"]
+    TELE --> DB["InfluxDB"]
+    DB --> DASH["Grafana"]
+    DASH --> USER["Operador visualiza\na produção"]
+
+    INIT_NET --> LINK_LOSS{"Conexão que estava ativa caiu?"}
+    LINK_LOSS -->|"Sim"| ALERT["Buzzer emite alerta de desconexão"]
+    ALERT --> RETRY
+```
+
+### Fluxo dos dados
+
+```text
+E18-D80NK
+    |
+    v
+GPIO 7 da Heltec
+    |
+    v
+Validação da passagem
+    |
+    v
+Evento de produção
+    |
+    v
+Fila em RAM do ESP32
+    |
+    v
+Wi-Fi / MQTT
+    |
+    v
+Mosquitto
+    |
+    v
+Telegraf
+    |
+    v
+InfluxDB
+    |
+    v
+Grafana
+```
+
+## Testes e integração contínua
+
+O projeto possui testes de host em `tests/` e integração contínua em `.github/workflows/ci.yml`.
+
+A CI executa:
+
+- testes do contador;
+- testes do relógio e SNTP;
+- testes da fila de eventos;
+- testes de comunicação;
+- testes do protocolo MQTT;
+- testes dos estados de rede;
+- testes do buzzer;
+- execução normal e com sanitizers;
+- compilação do firmware para ESP32-S3 usando ESP-IDF 5.5.5.
+
+### Executar os testes localmente
+
+No Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config libcjson-dev
+```
+
+Depois:
+
+```bash
+bash tests/run_tests.sh
+```
+
+Para executar com AddressSanitizer e UndefinedBehaviorSanitizer:
+
+```bash
+SANITIZE=1 \
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+bash tests/run_tests.sh
+```
+
+A suíte de host não substitui a validação física do sensor, do buzzer, da alimentação, da rede ou da Raspberry Pi.
+
+## Estado atual e limitações
+
+A versão atual implementa o fluxo principal necessário para o protótipo, mas possui limitações que devem ser consideradas:
+
+- o rádio LoRa da Heltec não é utilizado atualmente;
+- o display OLED da placa não faz parte da implementação atual;
+- eventos pendentes no ESP32 ficam em RAM e podem ser perdidos se a placa reiniciar ou perder alimentação;
+- a fila local possui capacidade finita;
+- o servidor é mantido em um repositório separado;
+- o armazenamento persistente acontece no lado do servidor, não no ESP32;
+- a sincronização de horário depende de conectividade com a fonte SNTP configurada;
+- as opções de `heartbeat`, prefixo de tópico e ACK presentes no `Kconfig` ainda não representam uma interface totalmente consolidada no fluxo atual;
+- não há arquivo de licença identificado na versão analisada do repositório.
+
+Essas limitações não impedem o uso do protótipo, mas devem ser consideradas antes de tratar a solução como produto final de produção industrial.
+
+## Boas práticas de segurança
+
+Para desenvolvimento em bancada, a infraestrutura pode utilizar configurações simplificadas. Antes de qualquer implantação fora de uma rede controlada:
+
+- não versione SSID, senha Wi-Fi ou outras credenciais;
+- não publique `sdkconfig` contendo credenciais;
+- altere a senha padrão do Grafana;
+- habilite autenticação no Mosquitto;
+- habilite autenticação no banco de dados quando aplicável;
+- não exponha diretamente as portas MQTT e InfluxDB à internet;
+- utilize uma rede privada, VPN ou solução equivalente para acesso remoto;
+- mantenha Raspberry Pi, Docker e imagens de container atualizados;
+- utilize fonte adequada e proteção elétrica compatível com o ambiente da instalação.
+
+## Equipe
+
+- Francisco Irlan de Oliveira Barros
+- Valney Maia Neto
+- Valdimiro Alves dos Santos Neto
+- João Henrique de Brito Leandro Bitu Corrêa
+
+---
+
+FlowCount é um protótipo de automação industrial voltado à contagem de peças e acompanhamento de produção, combinando sensoriamento em edge, comunicação em rede e visualização centralizada de dados.
