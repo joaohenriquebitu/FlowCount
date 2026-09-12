@@ -24,6 +24,7 @@ static const char *TAG = "WIFI";
 static EventGroupHandle_t wifi_event_group;
 static esp_netif_t *wifi_netif;
 static esp_timer_handle_t reconnect_timer;
+static char wifi_ip[16] = "0.0.0.0";
 
 static void reconnect_timer_callback(void *arg)
 {
@@ -92,6 +93,9 @@ static void wifi_event_handler(void *arg,
         xEventGroupClearBits(
             wifi_event_group,
             WIFI_CONNECTED_BIT);
+
+        wifi_ip[0] = '\0';
+
         buzzer_connection_changed(BUZZER_CONNECTION_WIFI, false);
 
         const wifi_event_sta_disconnected_t *event =
@@ -115,6 +119,13 @@ static void wifi_event_handler(void *arg,
         ESP_LOGI(TAG,
                  "Wi-Fi conectado, IP=" IPSTR,
                  IP2STR(&event->ip_info.ip));
+
+        snprintf(
+            wifi_ip,
+            sizeof(wifi_ip),
+            IPSTR,
+            IP2STR(&event->ip_info.ip)
+        );
 
         xEventGroupSetBits(
             wifi_event_group,
@@ -288,26 +299,16 @@ bool wifi_manager_get_ip(
 
     buffer[0] = '\0';
 
-    if (wifi_netif == NULL ||
-        !wifi_manager_is_connected()) {
-        return false;
-    }
-
-    esp_netif_ip_info_t ip_info;
-
-    if (esp_netif_get_ip_info(
-            wifi_netif,
-            &ip_info
-        ) != ESP_OK) {
-
+    if (!wifi_manager_is_connected() ||
+        wifi_ip[0] == '\0') {
         return false;
     }
 
     snprintf(
         buffer,
         buffer_size,
-        IPSTR,
-        IP2STR(&ip_info.ip)
+        "%s",
+        wifi_ip
     );
 
     return true;
