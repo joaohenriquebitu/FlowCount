@@ -8,7 +8,7 @@ A implementação atual utiliza a placa **Heltec WiFi LoRa 32 V3**, porém a com
 
 ## Demonstração
 
-![Demonstração do FlowCount](assets/demo/flowcount-demo.mp4)
+![Demonstração do FlowCount](assets/demo/flowcount-demo.gif)
 
 ## Sumário
 
