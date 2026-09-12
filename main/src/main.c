@@ -19,6 +19,7 @@
 #include "communication/wifi_manager.h"
 #include "communication/mqtt_manager.h"
 #include "indicators/buzzer.h"
+#include "indicators/oled.h"
 #include "communication/communication.h"
 
 
@@ -226,6 +227,25 @@ void app_main(void)
 
     /*
      * ============================================================
+     * OLED
+     * ============================================================
+     *
+     * A falha do OLED não impede a coleta.
+     */
+    const esp_err_t oled_status =
+        oled_init();
+
+    if (oled_status != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "OLED indisponivel: %s",
+            esp_err_to_name(oled_status)
+        );
+    }
+
+
+    /*
+     * ============================================================
      * CONTADOR
      * ============================================================
      *
@@ -314,6 +334,14 @@ void app_main(void)
      * à tarefa app_main.
      */
     bool mqtt_start_requested = false;
+
+    /*
+     * O framebuffer inteiro do OLED é enviado por I2C.
+     * Atualizamos a tela no máximo 4 vezes por segundo,
+     * sem interferir no ciclo de amostragem de 10 ms.
+     */
+    int64_t last_oled_update_us = 0;
+
     while (true) {
 
         /*
@@ -480,6 +508,53 @@ void app_main(void)
         app_time_poll(
             occurrence_us
         );
+
+
+        /*
+         * --------------------------------------------------------
+         * OLED
+         * --------------------------------------------------------
+         *
+         * Atualização limitada a 250 ms para não enviar o
+         * framebuffer inteiro a cada ciclo de 10 ms.
+         */
+        if (occurrence_us - last_oled_update_us >= INT64_C(250000)) {
+
+            char oled_ip[16] = "0.0.0.0";
+
+#if CONFIG_FLOWCOUNT_COMM_ENABLED
+
+            (void)wifi_manager_get_ip(
+                oled_ip,
+                sizeof(oled_ip)
+            );
+
+            const bool oled_wifi_connected =
+                wifi_manager_is_connected();
+
+            const bool oled_mqtt_connected =
+                mqtt_manager_is_connected();
+
+#else
+
+            const bool oled_wifi_connected = false;
+            const bool oled_mqtt_connected = false;
+
+#endif
+
+            const production_stats_t oled_stats =
+                production_events_stats();
+
+            oled_update(
+                oled_wifi_connected,
+                oled_ip,
+                oled_mqtt_connected,
+                oled_stats.total
+            );
+
+            last_oled_update_us =
+                occurrence_us;
+        }
 
 
         /*

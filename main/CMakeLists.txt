@@ -8,6 +8,7 @@ idf_component_register(
         "src/communication/mqtt_manager.c"
         "src/communication/mqtt_protocol.c"
         "src/indicators/buzzer.c"
+        "src/indicators/oled.c"
         "src/communication/communication.c"
 
     INCLUDE_DIRS "include"
@@ -15,6 +16,8 @@ idf_component_register(
     PRIV_REQUIRES
         esp_driver_gpio
         esp_driver_ledc
+        esp_driver_i2c
+        esp_lcd
         esp_timer
         esp_hw_support
         bootloader_support
