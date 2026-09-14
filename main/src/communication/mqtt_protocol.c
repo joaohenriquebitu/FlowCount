@@ -120,6 +120,41 @@ bool mqtt_event_json(
     }
 
 
+    /*
+     * evt_id identifica o evento de forma estável entre reenvios:
+     * sessão do boot atual (16 bytes -> 32 hex) + sequência monotônica
+     * dentro dessa sessão.
+     *
+     * O servidor usa (bancada, evt_id) como chave de deduplicação forte
+     * (ver postgres/init/001_schema.sql no repositório do servidor).
+     * Sem evt_id, ele cai numa deduplicação mais frágil, só por
+     * timestamp — reenviar o mesmo evento nunca deve contar duas vezes.
+     */
+    char session_text[33];
+
+    mqtt_session_text(
+        event->session,
+        session_text
+    );
+
+    char evt_id[64]; // 32 (sessão) + '-' + até 20 digitos (uint64) + '\0' = 54 no pior caso.
+
+    const int evt_id_written =
+        snprintf(
+            evt_id,
+            sizeof(evt_id),
+            "%s-%" PRIu64,
+            session_text,
+            event->sequence
+        );
+
+    if (evt_id_written < 0 ||
+        (size_t)evt_id_written >= sizeof(evt_id)) {
+
+        return false;
+    }
+
+
     const int written =
         snprintf(
             buffer,
@@ -127,11 +162,13 @@ bool mqtt_event_json(
 
             "{"
             "\"bancada\":\"%s\","
+            "\"evt_id\":\"%s\","
             "\"ts\":\"%s\","
             "\"delta\":1"
             "}",
 
             CONFIG_FLOWCOUNT_BANCADA,
+            evt_id,
             timestamp
         );
 

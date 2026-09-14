@@ -119,6 +119,7 @@ Existe uma configuração `FLOWCOUNT_TOPIC_PREFIX` e funções auxiliares para v
 ```json
 {
   "bancada": "B01",
+  "evt_id": "00112233445566778899aabbccddeeff-482",
   "ts": "2026-09-11T21:00:00.123000Z",
   "delta": 1
 }
@@ -129,12 +130,13 @@ Campos:
 | Campo | Descrição |
 |---|---|
 | `bancada` | identificador textual da estação |
+| `evt_id` | `<sessão do boot em hex>-<sequência>` — identifica o evento de forma estável entre reenvios (ver `production_event_t.session`/`.sequence`) |
 | `ts` | horário UTC da ocorrência, em ISO 8601 com fração de segundo |
 | `delta` | incremento de produção; atualmente sempre `1` |
 
 O timestamp do payload vem do momento da passagem, não do momento da transmissão.
 
-O servidor atual aceita esse formato: Telegraf usa `json_time_key = "ts"`, transforma `bancada` em tag e grava os campos numéricos na measurement `producao`.
+O servidor atual (repositório `Grafana_Dashboards`) recebe isso pelo Mosquitto, valida e grava no PostgreSQL via Node-RED. `evt_id` é a chave usada para deduplicar um evento reenviado (`INSERT ... ON CONFLICT DO NOTHING` sobre um índice único em `(bancada, evt_id)`) — sem ele, a deduplicação cai para uma chave mais frágil, só por `ts`. Ver `postgres/init/001_schema.sql` naquele repositório.
 
 ## QoS e outbox
 
@@ -232,15 +234,17 @@ A entrega em produção nesta revisão termina, do ponto de vista da fila da apl
 Na Raspberry Pi, para observar mensagens chegando:
 
 ```bash
-mosquitto_sub -h localhost -t 'fabrica/#' -v
+mosquitto_sub -h localhost -u flowcount -P "SENHA" -t 'fabrica/#' -v
 ```
 
-Em outra máquina da mesma rede, substitua `localhost` pelo IP da Raspberry.
+(o broker exige usuário/senha — ver a seção de autenticação MQTT no README do
+repositório `Grafana_Dashboards`.) Em outra máquina da mesma rede, substitua
+`localhost` pelo IP da Raspberry.
 
 Uma mensagem válida deve se parecer com:
 
 ```text
-fabrica/setorA/bancada/B01/evento {"bancada":"B01","ts":"2026-09-11T21:00:00.123000Z","delta":1}
+fabrica/setorA/bancada/B01/evento {"bancada":"B01","evt_id":"00112233445566778899aabbccddeeff-482","ts":"2026-09-11T21:00:00.123000Z","delta":1}
 ```
 
 ## Diagnóstico rápido

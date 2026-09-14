@@ -10,7 +10,7 @@ static void test_payload(void)
     production_event_t event = {.clock_synced = 1, .timestamp_ms = INT64_C(1700000000123)};
     char payload[MQTT_PAYLOAD_SIZE];
     assert(mqtt_event_json(&event, payload, sizeof(payload)));
-    assert(strcmp(payload, "{\"bancada\":\"B01\",\"ts\":\"2023-11-14T22:13:20.123000Z\",\"delta\":1}") == 0);
+    assert(strcmp(payload, "{\"bancada\":\"B01\",\"evt_id\":\"00000000000000000000000000000000-0\",\"ts\":\"2023-11-14T22:13:20.123000Z\",\"delta\":1}") == 0);
     const size_t length = strlen(payload);
     assert(!mqtt_event_json(&event, payload, length));
     assert(mqtt_event_json(&event, payload, length + 1));

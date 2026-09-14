@@ -194,6 +194,7 @@ Payload atual:
 ```json
 {
   "bancada": "B01",
+  "evt_id": "00112233445566778899aabbccddeeff-482",
   "ts": "2026-09-11T21:00:00.123000Z",
   "delta": 1
 }
@@ -218,9 +219,9 @@ mosquitto_sub -h localhost -t 'fabrica/#' -v
 Em outro terminal, publique um evento simples:
 
 ```bash
-mosquitto_pub -h localhost \
+mosquitto_pub -h localhost -u flowcount -P "SENHA" \
   -t 'fabrica/setorA/bancada/B01/evento' \
-  -m '{"bancada":"B01","ts":"2026-09-11T21:00:00.123000Z","delta":1}'
+  -m '{"bancada":"B01","evt_id":"00112233445566778899aabbccddeeff-482","ts":"2026-09-11T21:00:00.123000Z","delta":1}'
 ```
 
 A mensagem deve aparecer no `mosquitto_sub`.
