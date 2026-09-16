@@ -148,7 +148,7 @@ O evento mantém `timestamp_ms` em Unix UTC. Na camada MQTT, esse valor é conve
 
 A precisão interna do evento é de milissegundos. O serializador adiciona os três zeros restantes para produzir uma fração com seis casas no texto.
 
-O Telegraf do servidor usa `ts` como horário do ponto, portanto preservar a fração de segundo é importante para evitar colisões de eventos da mesma bancada no mesmo segundo.
+O fluxo Node-RED do servidor recebe `ts` como horário do evento. Preserve a fração de segundo durante o processamento para manter a precisão temporal; a identificação para deduplicação utiliza `evt_id`, conforme o [protocolo de comunicação](../communication/README.md).
 
 ## Configuração
 
