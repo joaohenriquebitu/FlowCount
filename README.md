@@ -1,3 +1,5 @@
+<img width="1730" height="181" alt="Logo Github ultrawide short" src="https://github.com/user-attachments/assets/9f38f1b4-46aa-434c-aada-ff19e4ea3e89" />
+
 # FlowCount
 
 Sistema de contagem automatizada de peças para ambientes industriais, composto por um nó de bancada baseado em ESP32-S3 e por um servidor de supervisão executado em Raspberry Pi 5.
