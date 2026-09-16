@@ -15,6 +15,7 @@ A suíte procura detectar regressões em:
 - política de entrega;
 - callbacks Wi-Fi/MQTT;
 - buzzer e alertas;
+- LEDs de contagem e conexão;
 - perfis de build do firmware via CI.
 
 Ela não substitui testes físicos de sensor, rede real, alimentação ou buzzer.
@@ -30,10 +31,12 @@ tests/
 ├── test_mqtt_protocol.c
 ├── test_network_alerts.c
 ├── test_buzzer.c
+├── test_leds.c
 ├── test_app_time.c
 ├── fake_esp_idf.h
 ├── fake_network.h
 ├── fake_buzzer.h
+├── fake_leds.h
 ├── fake_time.h
 └── fake_time.c
 ```
@@ -210,6 +213,20 @@ Valida o sequenciador do buzzer:
 - 16 beeps pendentes e overflow;
 - recuperação após falhas de LEDC.
 
+### `test_leds.c`
+
+Valida os LEDs com comunicação habilitada e desabilitada:
+
+- verde apagado no boot e pulso imediato de 100 ms por produto;
+- renovação da duração quando outra peça passa durante o pulso;
+- contagem e pulso verde durante uma desconexão;
+- vermelho contínuo até Wi-Fi e MQTT conectarem, incluindo quedas e reconexões;
+- vermelho apagado quando a comunicação está desabilitada;
+- nenhuma escrita GPIO quando o estado permanece igual;
+- inicialização idempotente, falhas de configuração e de escrita dos dois LEDs;
+- repetição de escritas que falharam sem bloquear o outro LED;
+- rejeição de GPIO inválido, LEDs no mesmo GPIO e conflitos com buzzer, sensor e OLED.
+
 ## O que é fake e o que é real
 
 Os testes compilam os arquivos de implementação reais do projeto, mas substituem APIs de plataforma por fakes.
@@ -222,6 +239,7 @@ Exemplos de elementos simulados:
 - Wi-Fi;
 - ESP-MQTT;
 - LEDC;
+- GPIO;
 - `esp_timer`;
 - SNTP;
 - RNG.

@@ -48,6 +48,26 @@ fi
 "$test_dir/mqtt"
 
 mkdir -p "$test_dir/driver"
+printf '#include "fake_leds.h"\n' > "$test_dir/driver/gpio.h"
+for communication in 0 1; do
+    "$compiler" "${flags[@]}" -I "$test_dir" -I tests -I main/include \
+        -DCONFIG_FLOWCOUNT_COMM_ENABLED="$communication" \
+        -include tests/fake_leds.h main/src/indicators/leds.c tests/test_leds.c \
+        -o "$test_dir/leds-$communication"
+    "$test_dir/leds-$communication"
+    for failure in config green red; do
+        "$test_dir/leds-$communication" "$failure"
+    done
+done
+# Duplicate pins, occupied peripherals, and a GPIO that cannot drive an output.
+for red_pin in 1 7 17 18 21 22 36 45; do
+    "$compiler" "${flags[@]}" -I "$test_dir" -I tests -I main/include \
+        -DCONFIG_FLOWCOUNT_COMM_ENABLED=1 -DTEST_EXPECT_INVALID_PINS=1 \
+        -DCONFIG_FLOWCOUNT_LED_RED_GPIO="$red_pin" \
+        -include tests/fake_leds.h main/src/indicators/leds.c tests/test_leds.c \
+        -o "$test_dir/leds-invalid-$red_pin"
+    "$test_dir/leds-invalid-$red_pin"
+done
 printf '#include "fake_buzzer.h"\n' > "$test_dir/driver/ledc.h"
 "$compiler" "${flags[@]}" -I "$test_dir" -I tests -I main/include \
     -include tests/fake_buzzer.h main/src/indicators/buzzer.c tests/test_buzzer.c \

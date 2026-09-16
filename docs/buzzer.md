@@ -37,8 +37,7 @@ O projeto utiliza:
 - buzzer KC-1206;
 - transistor NPN 2N2222A-1726;
 - resistor de 2 kΩ entre o GPIO e a base;
-- GND comum;
-- LED vermelho com resistor de 220 Ω no protótipo.
+- GND comum.
 
 Ligação funcional:
 
@@ -88,15 +87,15 @@ O timer é chamado a cada 10 ms. Os produtores apenas enfileiram notificações.
 
 Há capacidade para até 16 beeps de contagem pendentes. Excesso retorna `ESP_ERR_NO_MEM` sem interferir na contagem de peças.
 
-## LED associado
+## LEDs independentes
 
-O firmware não controla um LED em GPIO independente. No esboço atual, o LED vermelho está associado ao estágio do transistor e pode acompanhar o acionamento do buzzer.
+Os LEDs verde e vermelho são controlados pelo módulo `leds`, com saídas próprias: GPIO1 para o verde e GPIO40 para o vermelho. Retire a ligação antiga do LED ao estágio do transistor do buzzer. Cada LED recebe seu próprio resistor em série e tem o cátodo ligado ao GND, conforme [hardware.md](hardware.md#leds-independentes).
 
-Isso significa que, na montagem atual, o LED não deve ser interpretado como um indicador autônomo de Wi-Fi, MQTT ou estado da máquina.
+O verde pulsa por 100 ms em cada contagem válida, inclusive offline. O vermelho permanece aceso enquanto Wi-Fi ou MQTT estiver desconectado, inclusive ao iniciar; apaga com ambas as conexões prontas e fica apagado se a comunicação estiver desabilitada. Os beeps de contagem e os três pulsos de alerta permanecem iguais. O vermelho continua aceso depois do fim do alerta sonoro, até a conexão voltar.
 
 ## Ensaio na placa
 
-1. com a montagem desligada, confira transistor, resistor de 2 kΩ, polaridade do buzzer, LED/resistor e continuidade do GND;
+1. com a montagem desligada, confira transistor, resistor de 2 kΩ, polaridade do buzzer e continuidade do GND; confirme que os LEDs estão em GPIOs independentes;
 2. energize e confirme a tensão de alimentação real do buzzer;
 3. grave o firmware e abra o monitor serial;
 4. confirme um log semelhante a `KC-1206: GPIO=45 PWM=2400 Hz; contagem=60 ms; alerta=3 pulsos`;

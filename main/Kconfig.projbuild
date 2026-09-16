@@ -91,6 +91,34 @@ menu "FlowCount - comunicacao ESP32"
         default 30
 endmenu
 
+menu "FlowCount - LEDs de sinalizacao"
+    config FLOWCOUNT_LED_GREEN_GPIO
+        int "GPIO do LED verde (passagem de produto)"
+        range 0 48
+        default 1
+        help
+            Saida ativa em HIGH. Ligue GPIO -> resistor em serie -> anodo
+            do LED; catodo -> GND. Use um GPIO exclusivo para cada LED,
+            separado do buzzer, sensor e perifericos da placa.
+    config FLOWCOUNT_LED_RED_GPIO
+        int "GPIO do LED vermelho (conexao indisponivel)"
+        range 0 48
+        default 40
+        help
+            Saida ativa em HIGH, com resistor em serie proprio.
+            Aceso enquanto Wi-Fi ou MQTT estiver desconectado, inclusive
+            no boot. Apagado quando ambos conectam ou quando a comunicacao
+            esta desabilitada no firmware.
+    config FLOWCOUNT_LED_PULSE_MS
+        int "Duracao do pulso verde por produto (ms)"
+        range 10 2000
+        default 100
+        help
+            Pulso por contagem local, inclusive sem conexao. Uma nova
+            contagem durante o pulso renova sua duracao. A atualizacao
+            ocorre no loop principal, sem espera bloqueante.
+endmenu
+
 menu "FlowCount - buzzer KC-1206"
     config FLOWCOUNT_BUZZER_GPIO
         int "GPIO de comando do transistor do buzzer"
