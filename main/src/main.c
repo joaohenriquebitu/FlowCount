@@ -19,6 +19,7 @@
 #include "communication/wifi_manager.h"
 #include "communication/mqtt_manager.h"
 #include "indicators/buzzer.h"
+#include "indicators/leds.h"
 #include "indicators/oled.h"
 #include "communication/communication.h"
 
@@ -100,6 +101,16 @@ void app_main(void)
             TAG,
             "Relogio indisponivel (%d); eventos sem UTC",
             (int)clock_status
+        );
+    }
+
+    const esp_err_t leds_status = leds_init();
+
+    if (leds_status != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "LEDs indisponiveis: %s",
+            esp_err_to_name(leds_status)
         );
     }
 
@@ -341,6 +352,7 @@ void app_main(void)
      * sem interferir no ciclo de amostragem de 10 ms.
      */
     int64_t last_oled_update_us = 0;
+    esp_err_t last_led_status = ESP_OK;
 
     while (true) {
 
@@ -502,6 +514,35 @@ void app_main(void)
 
         /*
          * --------------------------------------------------------
+         * LEDs independentes do som: verde por contagem local;
+         * vermelho aceso enquanto Wi-Fi ou MQTT estiver indisponível.
+         */
+#if CONFIG_FLOWCOUNT_COMM_ENABLED
+        const bool current_wifi_connected = wifi_manager_is_connected();
+        const bool current_mqtt_connected = mqtt_manager_is_connected();
+#else
+        const bool current_wifi_connected = false;
+        const bool current_mqtt_connected = false;
+#endif
+
+        if (leds_status == ESP_OK) {
+            const esp_err_t status = leds_update(
+                (result & COUNTER_COUNT) != 0,
+                current_wifi_connected,
+                current_mqtt_connected,
+                esp_timer_get_time()
+            );
+
+            // O módulo tenta novamente; evite um log a cada amostragem.
+            if (status != ESP_OK && status != last_led_status) {
+                ESP_LOGW(TAG, "Falha ao atualizar LEDs: %s", esp_err_to_name(status));
+            }
+            last_led_status = status;
+        }
+
+
+        /*
+         * --------------------------------------------------------
          * MANUTENÇÃO / DIAGNÓSTICO DO RELÓGIO
          * --------------------------------------------------------
          */
@@ -529,26 +570,15 @@ void app_main(void)
                 sizeof(oled_ip)
             );
 
-            const bool oled_wifi_connected =
-                wifi_manager_is_connected();
-
-            const bool oled_mqtt_connected =
-                mqtt_manager_is_connected();
-
-#else
-
-            const bool oled_wifi_connected = false;
-            const bool oled_mqtt_connected = false;
-
 #endif
 
             const production_stats_t oled_stats =
                 production_events_stats();
 
             oled_update(
-                oled_wifi_connected,
+                current_wifi_connected,
                 oled_ip,
-                oled_mqtt_connected,
+                current_mqtt_connected,
                 oled_stats.total
             );
 

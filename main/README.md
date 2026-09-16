@@ -26,7 +26,8 @@ O firmware é a camada de edge computing do FlowCount. Ele é responsável por:
 5. manter temporariamente os eventos em uma fila de RAM;
 6. conectar-se à rede Wi-Fi e ao broker MQTT;
 7. encaminhar os eventos ao servidor;
-8. emitir sinalização sonora para contagens e quedas de conectividade.
+8. emitir sinalização sonora para contagens e quedas de conectividade;
+9. pulsar o LED verde em cada contagem e manter o vermelho aceso enquanto Wi-Fi ou MQTT estiver desconectado.
 
 A aplicação foi organizada para que falhas de rede não interrompam a leitura do sensor. O caminho crítico da contagem continua executando mesmo quando Wi-Fi, MQTT ou SNTP estão indisponíveis.
 
@@ -42,6 +43,8 @@ A aplicação foi organizada para que falhas de rede não interrompam a leitura 
 | Sistema de build | CMake + ESP-IDF |
 | Sensor no firmware | GPIO 7, ativo em nível baixo |
 | Buzzer no firmware | GPIO configurável, padrão GPIO 45 |
+| LED verde | GPIO configurável, padrão GPIO 1; pulso de 100 ms |
+| LED vermelho | GPIO configurável, padrão GPIO 40; aceso sem Wi-Fi ou MQTT |
 | Período de amostragem do sensor | 10 ms |
 
 O rádio LoRa presente na placa Heltec não participa do fluxo atual. A comunicação implementada nesta versão utiliza Wi-Fi e MQTT.
@@ -64,7 +67,8 @@ main/
 │   │   ├── counter.h
 │   │   └── production_event.h
 │   ├── indicators/
-│   │   └── buzzer.h
+│   │   ├── buzzer.h
+│   │   └── leds.h
 │   └── time/
 │       └── app_time.h
 └── src/
@@ -78,7 +82,8 @@ main/
     │   ├── counter.c
     │   └── production_event.c
     ├── indicators/
-    │   └── buzzer.c
+    │   ├── buzzer.c
+    │   └── leds.c
     └── time/
         └── app_time.c
 ```
@@ -96,6 +101,7 @@ flowchart TD
     MQTT["mqtt_manager"]
     COMM["communication"]
     BUZZER["buzzer"]
+    LEDS["leds"]
 
     SENSOR --> MAIN
     MAIN --> COUNTER
@@ -106,6 +112,7 @@ flowchart TD
     EVENTS --> COMM
     COMM --> MQTT
     MAIN --> BUZZER
+    MAIN -->|contagem e estados Wi-Fi/MQTT| LEDS
     WIFI --> BUZZER
     MQTT --> BUZZER
 ```
@@ -115,7 +122,7 @@ flowchart TD
 A função `app_main()` realiza a inicialização em uma ordem deliberada:
 
 1. **Relógio:** `app_time_init()` prepara o estado temporal, mas não espera conexão nem sincronização.
-2. **Buzzer:** `buzzer_init()` configura LEDC, PWM e o timer periódico usado pelo sequenciador de sons.
+2. **Indicadores:** `leds_init()` configura os GPIOs dos LEDs, com verde apagado e vermelho aceso até conectar Wi-Fi e MQTT (apagado se a comunicação estiver desabilitada); `buzzer_init()` configura LEDC, PWM e o timer periódico usado pelo sequenciador de sons.
 3. **Eventos de produção:** `production_events_init()` cria a sessão da execução e a fila em RAM.
 4. **Sensor:** configura GPIO 7 como entrada com interrupção em qualquer borda.
 5. **Wi-Fi:** `wifi_manager_init()` prepara a interface Station e inicia a tentativa de conexão.
@@ -131,6 +138,7 @@ sequenceDiagram
     participant APP as app_main
     participant CLK as app_time
     participant BZ as buzzer
+    participant LED as leds
     participant EVT as production_event
     participant GPIO as sensor GPIO
     participant WIFI as wifi_manager
@@ -138,6 +146,7 @@ sequenceDiagram
     participant COMM as communication
 
     APP->>CLK: app_time_init()
+    APP->>LED: leds_init()
     APP->>BZ: buzzer_init()
     APP->>EVT: production_events_init()
     APP->>GPIO: configurar GPIO 7 + ISR
@@ -150,6 +159,7 @@ sequenceDiagram
         APP->>APP: counter_update()
         APP->>WIFI: verificar conectividade
         APP->>MQTT: iniciar cliente quando houver IP
+        APP->>LED: leds_update(contagem, Wi-Fi, MQTT, now_us)
         APP->>CLK: iniciar/pollear SNTP
     end
 ```
@@ -162,7 +172,7 @@ Quando a máquina de estados reconhece uma passagem válida:
 
 1. `counter_update()` retorna `COUNTER_COUNT`;
 2. `production_events_record()` cria e enfileira o evento;
-3. `buzzer_beep()` agenda um beep curto;
+3. `buzzer_beep()` agenda um beep curto e `leds_update()` inicia o pulso verde de 100 ms;
 4. a tarefa de comunicação, em paralelo, tenta transferir os eventos pendentes para o outbox do ESP-MQTT;
 5. o servidor recebe o JSON e segue com a ingestão no pipeline de supervisão.
 
@@ -173,10 +183,13 @@ flowchart LR
     B -->|COUNTER_COUNT| C["production_events_record"]
     C --> D["Fila FIFO em RAM"]
     C --> E["buzzer_beep"]
+    B -->|COUNTER_COUNT| LED["Pulso verde / leds_update"]
     D --> F["communication task"]
     F -->|online| G["MQTT outbox QoS 1"]
     F -->|offline/erro| D
 ```
+
+A passagem é confirmada após a liberação estável do sensor. O pulso verde acontece mesmo offline e indica a contagem local, sem confirmar a entrega ao servidor. Uma nova passagem durante o pulso renova sua duração. Em cada iteração do loop principal, `leds_update()` também mantém o vermelho aceso se Wi-Fi **ou** MQTT estiver desconectado, inclusive na primeira conexão. Com `FLOWCOUNT_COMM_ENABLED=n`, o vermelho permanece apagado.
 
 ## Concorrência e responsabilidades
 
@@ -191,6 +204,7 @@ O firmware evita que múltiplos contextos disputem estruturas críticas sem nece
 | Estado de Wi-Fi | callbacks do event loop + consultas por EventGroup |
 | Estado MQTT | callback ESP-MQTT + consultas por EventGroup |
 | Sequenciamento do buzzer | callback periódico de `esp_timer` |
+| GPIOs e duração do pulso dos LEDs | exclusivamente `app_main`, por `leds_update()` a cada iteração; sem timer próprio ou espera |
 | Referência UTC | callback SNTP; leitura protegida pelos consumidores |
 
 A fila de produção possui um único produtor e um único consumidor de entrega. O módulo verifica a propriedade das tarefas para reduzir o risco de uso incorreto.
@@ -221,6 +235,9 @@ Principais opções:
 | `FLOWCOUNT_CLOCK_MAX_AGE_SECONDS` | `86400` | Validade máxima da referência temporal |
 | `FLOWCOUNT_BUZZER_GPIO` | `45` | GPIO de comando do transistor do buzzer |
 | `FLOWCOUNT_BUZZER_FREQUENCY_HZ` | `2400` | Frequência do PWM do buzzer |
+| `FLOWCOUNT_LED_GREEN_GPIO` | `1` | GPIO do LED verde de contagem |
+| `FLOWCOUNT_LED_RED_GPIO` | `40` | GPIO do LED vermelho de conectividade |
+| `FLOWCOUNT_LED_PULSE_MS` | `100` | Duração do pulso verde em milissegundos |
 
 Existem ainda opções relacionadas a heartbeat, ACK de aplicação e prefixo de tópico. Parte dessa infraestrutura está definida no código, mas o caminho de entrega atualmente utilizado é o descrito em [communication](src/communication/README.md).
 

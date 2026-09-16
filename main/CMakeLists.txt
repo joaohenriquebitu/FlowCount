@@ -8,6 +8,7 @@ idf_component_register(
         "src/communication/mqtt_manager.c"
         "src/communication/mqtt_protocol.c"
         "src/indicators/buzzer.c"
+        "src/indicators/leds.c"
         "src/indicators/oled.c"
         "src/communication/communication.c"
 

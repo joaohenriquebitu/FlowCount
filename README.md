@@ -4,7 +4,7 @@
 
 Sistema de contagem automatizada de peças para ambientes industriais, composto por um nó de bancada baseado em ESP32-S3 e por um servidor de supervisão executado em Raspberry Pi 5.
 
-O FlowCount detecta a passagem de peças por um sensor fotoelétrico, registra cada passagem válida, envia os eventos pela rede Wi-Fi e apresenta os dados em dashboards no Grafana. O sistema também fornece sinalização local por buzzer e LED e mantém uma fila temporária de eventos no microcontrolador para lidar com indisponibilidades momentâneas de comunicação.
+O FlowCount detecta a passagem de peças por um sensor fotoelétrico, registra cada passagem válida, envia os eventos pela rede Wi-Fi e apresenta os dados em dashboards no Grafana. O sistema também fornece sinalização local por buzzer e LEDs independentes e mantém uma fila temporária de eventos no microcontrolador para lidar com indisponibilidades momentâneas de comunicação.
 
 A implementação atual utiliza a placa **Heltec WiFi LoRa 32 V3**, porém a comunicação usada pelo firmware neste estágio é **Wi-Fi + MQTT**. O rádio LoRa da placa não faz parte do fluxo atual do sistema.
 
@@ -71,7 +71,8 @@ O nó de bancada é responsável por interagir com o processo físico. Ele utili
 - sensor fotoelétrico E18-D80NK para detectar a passagem da peça;
 - Heltec WiFi LoRa 32 V3, baseada em ESP32-S3, para executar o firmware;
 - buzzer KC-1206 para sinalização sonora;
-- LED vermelho para sinalização visual;
+- LED verde para indicar cada passagem válida;
+- LED vermelho aceso enquanto Wi-Fi ou MQTT estiver desconectado;
 - circuito com transistor e resistores para interfacear corretamente os componentes.
 
 O firmware executa continuamente a leitura do sensor, identifica uma passagem válida, registra o evento e tenta encaminhá-lo ao servidor.
@@ -105,7 +106,7 @@ O processamento diretamente relacionado ao sensor acontece no ESP32-S3, próximo
 flowchart LR
     subgraph EDGE["Nó de bancada - Edge"]
         SENSOR["Sensor fotoelétrico\nE18-D80NK"] --> ESP["Heltec WiFi LoRa 32 V3\nESP32-S3"]
-        ESP --> SIGNAL["Buzzer KC-1206\nLED vermelho"]
+        ESP --> SIGNAL["Buzzer KC-1206\nLED verde e LED vermelho"]
         ESP --> QUEUE["Fila temporária\nde eventos em RAM"]
     end
 
@@ -148,8 +149,9 @@ A tabela abaixo considera a reprodução de **uma estação de contagem** conect
 | Transistor NPN 2N2222A-1726 | 1 por estação | Acionamento do buzzer | Evita alimentar a carga diretamente pelo GPIO |
 | Resistor 100 kΩ | 3 por estação | Interface do sensor | Valores utilizados no protótipo atual |
 | Resistor 2 kΩ | 1 por estação | Interface do transistor/buzzer | Utilizado no comando do transistor |
-| Resistor 220 Ω | 1 por estação | Limitação de corrente do LED | Ligado em série com o LED |
-| LED vermelho | 1 por estação | Sinalização visual | Indicador físico do protótipo |
+| Resistor 220 Ω | 2 por estação | Limitação de corrente dos LEDs | Um resistor em série com cada LED; valor de referência do protótipo |
+| LED verde | 1 por estação | Pulso em cada passagem válida | GPIO 1 por padrão |
+| LED vermelho | 1 por estação | Indicar Wi-Fi ou MQTT desconectado | GPIO 40 por padrão |
 | Protoboard ou placa de montagem | 1 por estação | Montagem do circuito | Para protótipo; em versão final pode ser substituída por PCB |
 | Jumpers/fios de conexão | Conforme necessário | Interligação elétrica | Macho-macho, macho-fêmea ou conforme a montagem |
 | Cabo USB de dados para a Heltec | 1 por estação | Alimentação, gravação e monitor serial | Deve permitir transferência de dados |
@@ -237,7 +239,8 @@ FlowCount/
 │   │   │   ├── counter.h
 │   │   │   └── production_event.h
 │   │   ├── indicators/
-│   │   │   └── buzzer.h
+│   │   │   ├── buzzer.h
+│   │   │   └── leds.h
 │   │   └── time/
 │   │       └── app_time.h
 │   └── src/
@@ -251,7 +254,8 @@ FlowCount/
 │       │   ├── counter.c
 │       │   └── production_event.c
 │       ├── indicators/
-│       │   └── buzzer.c
+│       │   ├── buzzer.c
+│       │   └── leds.c
 │       └── time/
 │           └── app_time.c
 ├── tests/
@@ -262,6 +266,7 @@ FlowCount/
 │   ├── test_mqtt_protocol.c
 │   ├── test_network_alerts.c
 │   ├── test_buzzer.c
+│   ├── test_leds.c
 │   └── test_app_time.c
 ├── CMakeLists.txt
 ├── .clangd
@@ -278,7 +283,7 @@ flowchart TD
     MAIN --> COUNTING["counting\nLeitura lógica e eventos de produção"]
     MAIN --> COMM["communication\nWi-Fi, MQTT e envio"]
     MAIN --> TIME["time\nHorário e sincronização"]
-    MAIN --> IND["indicators\nSinalização sonora"]
+    MAIN --> IND["indicators\nSinalização sonora e visual"]
 
     COUNTING --> COUNTER["counter.c"]
     COUNTING --> EVENT["production_event.c"]
@@ -290,6 +295,7 @@ flowchart TD
 
     TIME --> APPTIME["app_time.c"]
     IND --> BUZZER["buzzer.c"]
+    IND --> LEDS["leds.c"]
 
     TESTS["tests/"] -. valida .-> COUNTING
     TESTS -. valida .-> COMM
@@ -306,7 +312,7 @@ Este README apresenta apenas o funcionamento geral e o processo de instalação.
 | Visão detalhada do firmware | [main/README.md](main/README.md) | Inicialização, responsabilidades e integração dos módulos |
 | Contagem e geração de eventos | [main/src/counting/README.md](main/src/counting/README.md) | Máquina de estados, filtros e fila de produção |
 | Comunicação | [main/src/communication/README.md](main/src/communication/README.md) | Wi-Fi, MQTT, formato das mensagens e entrega |
-| Sinalização | [main/src/indicators/README.md](main/src/indicators/README.md) | Buzzer, LED e estados de sinalização |
+| Sinalização | [main/src/indicators/README.md](main/src/indicators/README.md) | Buzzer, LEDs e estados de sinalização |
 | Horário | [main/src/time/README.md](main/src/time/README.md) | SNTP, timestamps e validade do relógio |
 | Hardware e montagem | [docs/hardware.md](docs/hardware.md) | Esquemático, pinagem, alimentação e montagem física |
 | Buzzer KC-1206 | [docs/buzzer.md](docs/buzzer.md) | Funcionamento e validação do circuito do buzzer |
@@ -610,7 +616,7 @@ mqtt://192.168.1.50:1883
 
 Usuário e senha MQTT podem permanecer vazios enquanto o Mosquitto estiver configurado para acesso anônimo no ambiente de desenvolvimento. Para implantação real, configure autenticação nos dois lados.
 
-### 3.5 Buzzer
+### 3.5 Buzzer e LEDs
 
 A configuração atual usa:
 
@@ -620,6 +626,10 @@ Frequência: 2400 Hz
 ```
 
 O GPIO deve comandar o transistor do circuito, não alimentar diretamente o buzzer.
+
+Os LEDs possuem saídas próprias: **verde no GPIO 1**, com pulso de **100 ms** por contagem confirmada após liberar o sensor, e **vermelho no GPIO 40**, aceso desde a inicialização enquanto Wi-Fi ou MQTT estiver desconectado. O verde continua indicando contagens offline; o vermelho apaga quando as duas conexões estão prontas. Com `FLOWCOUNT_COMM_ENABLED=n`, o vermelho fica apagado.
+
+Cada LED deve ter seu próprio resistor em série e cátodo no GND. Retire a ligação antiga do LED ao estágio do buzzer. Consulte a [montagem e as particularidades dos GPIOs](docs/hardware.md#leds-independentes).
 
 ### 3.6 Salvar
 
@@ -737,6 +747,9 @@ Os parâmetros abaixo estão definidos em `main/Kconfig.projbuild`.
 | `FLOWCOUNT_WIFI_RETRY_SECONDS` | `5` | Intervalo entre tentativas de reconexão Wi-Fi |
 | `FLOWCOUNT_BUZZER_GPIO` | `45` | GPIO que comanda o circuito do buzzer |
 | `FLOWCOUNT_BUZZER_FREQUENCY_HZ` | `2400` | Frequência de PWM do buzzer |
+| `FLOWCOUNT_LED_GREEN_GPIO` | `1` | GPIO do LED verde de contagem |
+| `FLOWCOUNT_LED_RED_GPIO` | `40` | GPIO do LED vermelho de conectividade |
+| `FLOWCOUNT_LED_PULSE_MS` | `100` | Duração do pulso verde em milissegundos |
 
 O `Kconfig` também possui opções reservadas para prefixo de tópico, heartbeat e timeout de ACK. Na versão atual analisada, essas opções não representam integralmente o fluxo ativo de publicação e não devem ser tratadas como interface estável até que a documentação do módulo de comunicação seja concluída.
 
@@ -748,7 +761,7 @@ O diagrama abaixo apresenta o fluxo funcional do sistema sem entrar nos detalhes
 flowchart TD
     BOOT(["Energização da estação"])
     INIT_TIME["Inicializar relógio"]
-    INIT_SIGNAL["Inicializar buzzer"]
+    INIT_SIGNAL["Inicializar buzzer e LEDs"]
     INIT_QUEUE["Criar sessão e fila de eventos"]
     INIT_SENSOR["Configurar sensor no GPIO 7"]
     INIT_NET["Inicializar Wi-Fi e comunicação"]
@@ -763,7 +776,7 @@ flowchart TD
     VALIDATE -->|"Passagem válida"| EVENT["Criar evento de produção"]
 
     EVENT --> STORE["Adicionar evento à fila em RAM"]
-    EVENT --> BEEP["Gerar sinalização sonora"]
+    EVENT --> BEEP["Gerar beep e pulso verde"]
     BEEP --> WAIT
 
     INIT_NET --> WIFI{"Wi-Fi conectado?"}

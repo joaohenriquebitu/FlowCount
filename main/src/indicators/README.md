@@ -1,6 +1,6 @@
 # Sinalização local
 
-A sinalização implementada no firmware atual é concentrada no módulo do buzzer. O objetivo é fornecer retorno imediato ao operador sem bloquear a tarefa de contagem.
+A sinalização local possui módulos independentes para o buzzer e para os LEDs verde e vermelho. O objetivo é fornecer retorno imediato ao operador sem bloquear a tarefa de contagem.
 
 Voltar para a [documentação do firmware](../../README.md) ou para o [README principal](../../../README.md).
 
@@ -9,7 +9,9 @@ Voltar para a [documentação do firmware](../../README.md) ou para o [README pr
 ```text
 main/
 ├── include/indicators/buzzer.h
-└── src/indicators/buzzer.c
+├── include/indicators/leds.h
+├── src/indicators/buzzer.c
+└── src/indicators/leds.c
 ```
 
 ## Hardware controlado
@@ -25,7 +27,7 @@ O firmware controla um buzzer passivo KC-1206 por PWM. No protótipo atual:
 | Timer LEDC | 0 |
 | Canal LEDC | 0 |
 
-O GPIO não deve alimentar o buzzer diretamente. Ele deve comandar um transistor externo. Consulte [docs/hardware.md](../../../docs/hardware.md) e [docs/buzzer.md](../../../docs/buzzer.md).
+O GPIO não deve alimentar o buzzer diretamente. Ele deve comandar um transistor externo. Os LEDs usam saídas digitais próprias: verde no GPIO 1 e vermelho no GPIO 40, ambos ativos em HIGH, cada um com resistor em série e cátodo no GND. Remova a ligação antiga do LED ao estágio do buzzer. Consulte [docs/hardware.md](../../../docs/hardware.md) e [docs/buzzer.md](../../../docs/buzzer.md).
 
 ## Comportamentos sonoros
 
@@ -115,7 +117,7 @@ buzzer_connection_changed(BUZZER_CONNECTION_WIFI, connected);
 buzzer_connection_changed(BUZZER_CONNECTION_MQTT, connected);
 ```
 
-Uma queda só é considerada quando uma camada que estava conectada muda para desconectada. Assim, o boot offline não é interpretado como falha.
+Para o alerta sonoro, uma queda só é considerada quando uma camada que estava conectada muda para desconectada. Assim, o boot offline não dispara o som. O LED vermelho, por sua vez, já indica a falta de conexão desde sua inicialização.
 
 Como Wi-Fi e MQTT normalmente caem juntos, `outage_reported` agrupa o episódio em um único alerta. Quando ambas as camadas voltam a ficar conectadas, um novo episódio pode gerar outro alerta.
 
@@ -130,13 +132,33 @@ Se `ledc_set_duty()` ou `ledc_update_duty()` falhar:
 
 A aplicação não deve considerar o som como confirmação de que a contagem foi persistida no servidor.
 
-## LED vermelho
+## LEDs independentes
 
-O firmware desta revisão **não possui um módulo de LED nem um GPIO dedicado para LED**.
+| Situação | Verde (GPIO 1) | Vermelho (GPIO 40) |
+|---|---|---|
+| boot aguardando Wi-Fi/MQTT | apagado | aceso |
+| Wi-Fi e MQTT conectados, sem passagem | apagado | apagado |
+| passagem válida após liberar o sensor | aceso por 100 ms | acompanha o estado de conexão |
+| Wi-Fi ou MQTT desconectado | continua pulsando a cada passagem válida | aceso continuamente |
+| comunicação desabilitada em `menuconfig` | continua pulsando a cada passagem válida | apagado |
 
-No esboço físico/Wokwi atual, o LED vermelho aparece associado ao mesmo estágio de transistor do buzzer. Nesse arranjo, ele funciona como indicação elétrica do acionamento do estágio, e não como um indicador independente controlado por software.
+O verde indica a **contagem local**, inclusive se o evento não puder ser entregue ao servidor. Uma peça mantida no sensor não gera pulsos repetidos. O vermelho apaga somente quando **Wi-Fi e MQTT** estão conectados; não representa a validade do relógio nem confirma o armazenamento dos eventos no servidor.
 
-Se o projeto passar a exigir estados visuais próprios, como "online", "fila cheia" ou "erro", recomenda-se criar um módulo específico e reservar um GPIO independente.
+### API e temporização
+
+`leds_init()` prepara as duas saídas. Depois, exclusivamente `app_main` chama:
+
+```c
+leds_update(product_counted, wifi_connected, mqtt_connected, now_us);
+```
+
+Os três primeiros argumentos são `bool`; `now_us` é `int64_t` e contém o tempo monotônico em microssegundos. `product_counted` deve ser verdadeiro apenas na iteração em que `counter_update()` retorna `COUNTER_COUNT`.
+
+As duas funções retornam `esp_err_t`. Falhas de escrita do GPIO são informadas ao chamador e a saída é tentada novamente na próxima atualização; a contagem não depende do sucesso da sinalização.
+
+Uma contagem define o instante em que o verde deve apagar. As chamadas seguintes comparam `now_us` com esse instante, sem `vTaskDelay()` e sem timer próprio. Se chegar outra contagem durante o pulso, a duração é renovada a partir dela. O loop atual chama a atualização aproximadamente a cada 10 ms; atrasos no escalonamento podem estender o pulso e a resposta do vermelho.
+
+Os LEDs não dependem da fila de sons. Durante um alerta de rede, o verde pulsa imediatamente na contagem mesmo que o beep aguarde o fim do alerta. A sequência sonora existente permanece igual.
 
 ## Configuração
 
@@ -151,6 +173,14 @@ Opções:
 - `FLOWCOUNT_BUZZER_GPIO`, padrão 45;
 - `FLOWCOUNT_BUZZER_FREQUENCY_HZ`, padrão 2400 Hz.
 
+As opções dos LEDs são:
+
+- `FLOWCOUNT_LED_GREEN_GPIO`, padrão 1;
+- `FLOWCOUNT_LED_RED_GPIO`, padrão 40;
+- `FLOWCOUNT_LED_PULSE_MS`, padrão 100 ms.
+
+Os GPIOs dos LEDs devem ser distintos e não podem compartilhar a saída do buzzer, a entrada do sensor ou pinos usados por outros periféricos. Veja as [particularidades de GPIO1 e GPIO40 na Heltec](../../../docs/hardware.md#leds-independentes).
+
 GPIO45 é um pino de strapping do ESP32-S3. O circuito externo não deve forçar um nível inadequado durante reset/boot. A montagem deve ser validada na placa Heltec utilizada.
 
 ## Validação em bancada
@@ -164,9 +194,20 @@ GPIO45 é um pino de strapping do ESP32-S3. O circuito externo não deve forçar
 7. reconecte tudo, derrube novamente e confirme que o alerta foi rearmado;
 8. se não houver som, meça primeiro o GPIO/PWM e depois o estágio do transistor.
 
+Para os LEDs:
+
+1. inicialize sem rede e confirme o vermelho aceso e o verde apagado;
+2. conecte Wi-Fi e MQTT e confirme que o vermelho apaga;
+3. passe e libere uma peça válida: o verde deve acender por aproximadamente 100 ms;
+4. derrube somente o broker: o vermelho deve permanecer aceso após os três pulsos sonoros;
+5. conte uma peça offline e confirme o pulso verde com o vermelho ainda aceso;
+6. restabeleça ambas as conexões e confirme o vermelho apagado;
+7. teste com `FLOWCOUNT_COMM_ENABLED=n`: contagem e verde continuam funcionando, vermelho apagado.
+
 ## Testes relacionados
 
 - `tests/test_buzzer.c` valida PWM, duração, alertas, reconexão, fila e falhas do driver;
 - `tests/test_network_alerts.c` valida a integração das notificações de Wi-Fi/MQTT.
+- `tests/test_leds.c` valida estados de conexão, pulso verde, comunicação desabilitada, configuração de pinos e falhas de GPIO.
 
 Consulte [tests/README.md](../../../tests/README.md).
