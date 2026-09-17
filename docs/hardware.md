@@ -199,16 +199,3 @@ Teste:
 4. confirme apenas uma passagem válida;
 5. repita rapidamente para identificar o limite da instalação;
 6. mantenha o sensor bloqueado por mais de 5 s e confirme o aviso de possível bloqueio.
-
-## Wokwi
-
-A simulação disponível não substitui a validação elétrica do hardware. Ela utiliza:
-
-- uma placa ESP32-S3 genérica como substituta da Heltec;
-- uma chave deslizante como substituta do E18-D80NK;
-- um buzzer genérico;
-- analisador lógico para GPIO7 e GPIO45.
-
-Se o `diagram.json` ainda mostrar o LED junto ao buzzer, essa ligação representa a montagem anterior. Para testar os LEDs independentes, a simulação deve reproduzir os GPIOs 1 e 40 e os dois resistores descritos acima.
-
-Consulte [wokwi.md](wokwi.md).

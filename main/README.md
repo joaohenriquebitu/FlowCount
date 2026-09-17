@@ -292,5 +292,4 @@ A fila atual é volátil. Reiniciar ou desligar o ESP32 perde os eventos que ain
 - [Horário e sincronização](src/time/README.md)
 - [Hardware e montagem](../docs/hardware.md)
 - [Servidor na Raspberry Pi](../docs/raspberry.md)
-- [Simulação Wokwi](../docs/wokwi.md)
 - [Testes](../tests/README.md)
