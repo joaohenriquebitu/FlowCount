@@ -10,7 +10,8 @@ A tabela abaixo considera a reprodução de **uma estação de contagem** conect
 | Sensor fotoelétrico E18-D80NK | 1 por estação | Detectar a passagem das peças | Entrada de contagem utilizada pelo firmware |
 | Buzzer KC-1206 | 1 por estação | Sinalização sonora | Acionado por PWM através de transistor |
 | Transistor NPN 2N2222A-1726 | 1 por estação | Acionamento do buzzer | Evita alimentar a carga diretamente pelo GPIO |
-| Resistor 100 kΩ | 3 por estação | Interface do sensor | Valores utilizados no protótipo atual |
+| Resistor 50 kΩ | 1 por estação | Interface do sensor | Utilizado na adequação do sinal do E18-D80NK |
+| Resistor 100 kΩ | 1 por estação | Interface do sensor | Utilizado na adequação do sinal do E18-D80NK |
 | Resistor 2 kΩ | 1 por estação | Interface do transistor/buzzer | Utilizado no comando do transistor |
 | Resistor 220 Ω | 2 por estação | Limitação de corrente dos LEDs | Um resistor em série com cada LED; valor de referência do protótipo |
 | LED verde | 1 por estação | Pulso em cada passagem válida | GPIO 1 por padrão |
@@ -19,7 +20,6 @@ A tabela abaixo considera a reprodução de **uma estação de contagem** conect
 | Jumpers/fios de conexão | Conforme necessário | Interligação elétrica | Macho-macho, macho-fêmea ou conforme a montagem |
 | Cabo USB de dados para a Heltec | 1 por estação | Alimentação, gravação e monitor serial | Deve permitir transferência de dados |
 | Fonte/linha de 5 V adequada | 1 por estação | Alimentar os componentes de 5 V | Utilizar GND comum entre os elementos da estação |
-| Diodo de proteção para carga indutiva | 1 por estação | Proteção do acionamento do buzzer | Recomendado para a montagem final; dimensionar conforme o componente usado |
 | Esteira ou estrutura de passagem | 1 | Movimentar as peças pelo ponto de leitura | Pode ser substituída por passagem manual durante testes |
 | Raspberry Pi 5 | 1 por instalação | Executar o servidor central | Um único servidor pode atender várias estações |
 | Fonte USB-C 27 W para Raspberry Pi 5 | 1 | Alimentar a Raspberry Pi | A documentação do servidor recomenda fonte adequada à Pi 5 |

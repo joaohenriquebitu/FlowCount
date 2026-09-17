@@ -29,7 +29,8 @@ Interface elétrica -> Heltec WiFi LoRa 32 V3 / ESP32-S3
 | Sensor fotoelétrico E18-D80NK | 1 | detecção de passagem |
 | Buzzer KC-1206 | 1 | sinalização sonora |
 | Transistor NPN 2N2222A-1726 | 1 | chaveamento do buzzer |
-| Resistor 100 kΩ | 3 | componentes previstos na interface do sensor do protótipo |
+| Resistor 50 kΩ | 1 | interface elétrica do sensor E18-D80NK |
+| Resistor 100 kΩ | 1 | interface elétrica do sensor E18-D80NK |
 | Resistor 2 kΩ | 1 | resistor de base do transistor |
 | Resistor 220 Ω | 2 | um por LED; valor de referência do protótipo |
 | LED verde | 1 | pulso em cada passagem válida |
@@ -50,7 +51,7 @@ Além da estação, o sistema completo utiliza uma Raspberry Pi 5 como servidor.
 | LED verde | 1 por padrão | ativo em HIGH; pulso de 100 ms por passagem válida |
 | LED vermelho | 40 por padrão | ativo em HIGH enquanto Wi-Fi ou MQTT estiver desconectado |
 
-A placa física é a Heltec WiFi LoRa 32 V3. Sempre confirme a serigrafia e o pinout da revisão exata da placa antes de conectar jumpers. Um número GPIO não deve ser confundido com a posição física do header.
+A placa utilizada e validada no protótipo é a Heltec WiFi LoRa 32 V3, baseada no ESP32-S3. A pinagem apresentada nesta documentação corresponde à montagem utilizada no FlowCount. Um número GPIO não deve ser confundido com a posição física do pino no header da placa.
 
 ## Sensor E18-D80NK
 
@@ -71,11 +72,33 @@ Módulos E18-D80NK são encontrados em diferentes montagens e faixas de alimenta
 4. garanta que o GPIO do ESP32 nunca receba tensão acima da especificação de 3,3 V;
 5. compartilhe GND entre sensor e ESP32 quando a interface exigir referência comum.
 
-### Sobre os três resistores de 100 kΩ
+### Interface elétrica do sensor
 
-O protótipo informado para o projeto possui três resistores de 100 kΩ associados à interface do sensor. O `diagram.json` atual também os representa, porém a simulação usa uma chave deslizante no lugar do E18-D80NK e não constitui um esquema elétrico definitivo do módulo real.
+A interface entre o sensor E18-D80NK e o GPIO 7 da Heltec utiliza dois resistores, conforme o esquemático elétrico final do projeto:
 
-Por isso, os valores fazem parte da lista de materiais do protótipo, mas a ligação final desses três resistores deve ser conferida com o circuito físico validado antes de fabricar PCB ou replicar em escala. O requisito funcional que não pode ser violado é: **GPIO 7 deve receber HIGH compatível com 3,3 V quando livre e LOW quando a peça estiver presente**.
+- R2: 50 kΩ;
+- R3: 100 kΩ.
+
+A ligação é:
+
+Sensor E18-D80NK (saída)
+        |
+      50 kΩ
+        |
+        +------ GPIO 7 da Heltec
+        |
+      100 kΩ
+        |
+       GND
+
+O sensor é alimentado em 5 V e compartilha o GND com a Heltec.
+
+O GPIO 7 recebe o sinal utilizado pelo firmware para identificar a passagem das peças:
+
+- LOW: peça detectada;
+- HIGH: caminho livre.
+
+Esta é a configuração elétrica utilizada e validada no protótipo do FlowCount. Para a montagem física, deve-se seguir o esquemático disponível em `assets/esquema/esquema-flow-count.png`.
 
 ## Estágio do buzzer
 
@@ -91,10 +114,6 @@ GND ---------------- Emissor
                       Coletor -------- negativo do buzzer
                                        positivo do buzzer -> alimentação adequada
 ```
-
-O GPIO fornece apenas o sinal de controle. A corrente da carga não deve passar diretamente pelo pino do ESP32.
-
-Para uma carga magnética, use proteção contra transientes conforme a especificação do buzzer e do transistor. Um diodo de flyback sobre a carga é uma prática recomendada quando aplicável.
 
 A pinagem física B/C/E do 2N2222 varia entre encapsulamentos/fabricantes. Não determine base, coletor e emissor apenas pela posição visual do componente; confira o datasheet da peça instalada.
 
@@ -115,9 +134,16 @@ O verde acende por 100 ms quando a passagem é confirmada após a liberação es
 
 Os padrões podem ser alterados por `FLOWCOUNT_LED_GREEN_GPIO`, `FLOWCOUNT_LED_RED_GPIO` e `FLOWCOUNT_LED_PULSE_MS`. Os pinos escolhidos devem ser distintos e livres de outros usos no circuito.
 
-### Particularidades da Heltec V3
+### Particularidades da Heltec WiFi LoRa 32 V3
 
-O [datasheet oficial da Heltec V3.2, tabela 2.2-2](https://s.heltec.cn/download/WiFi_LoRa_32_V3/HTIT-WB32LA_V3.2.pdf) identifica GPIO1 e GPIO40 no header, mas também associa GPIO1 à leitura de tensão da bateria e GPIO40 à função JTAG `MTDO`. Confira a revisão instalada: usar GPIO1 como saída do LED impede a leitura da bateria pelo mesmo pino. GPIO40 não pode ser usado simultaneamente pelo LED e pela depuração JTAG externa nesses pinos. A [orientação oficial de GPIOs da Heltec](https://github.com/HelTecAutomation/HeltecWiKi/blob/main/docs/devices/open-source-hardware/esp32-series/lora-32/wifi-lora-32-v3/Pin-diagram-guidance.md) explica a reutilização dos pinos JTAG como GPIO.
+O FlowCount utiliza os GPIOs 1, 7, 40 e 45 da Heltec WiFi LoRa 32 V3. Na montagem validada:
+
+- GPIO 7: entrada do sensor;
+- GPIO 45: controle do buzzer;
+- GPIO 1: LED verde;
+- GPIO 40: LED vermelho.
+
+O rádio LoRa da placa não é utilizado pelo FlowCount. A comunicação com o servidor ocorre por Wi-Fi utilizando MQTT.
 
 ## Alimentação e GND
 
@@ -152,7 +178,7 @@ flowchart LR
     RED --> GND
 ```
 
-Esse diagrama representa relações funcionais. Para montagem definitiva, valide a polaridade do buzzer, a pinagem do transistor e o circuito exato do sensor.
+Esse diagrama apresenta as relações funcionais do circuito. Para a montagem elétrica, siga o esquemático final disponível em `assets/esquema/esquema-flow-count.png` e confirme a polaridade do buzzer e a identificação dos terminais B/C/E do transistor utilizado.
 
 ## Montagem recomendada
 
@@ -169,7 +195,7 @@ Esse diagrama representa relações funcionais. Para montagem definitiva, valide
 
 ## Checklist antes de ligar
 
-- [ ] pinout da revisão da Heltec confirmado;
+- [ ] pinagem da Heltec WiFi LoRa 32 V3 conferida;
 - [ ] GPIO 7 não recebe mais de 3,3 V;
 - [ ] transistor B/C/E confirmado por datasheet;
 - [ ] resistor de base de 2 kΩ instalado;

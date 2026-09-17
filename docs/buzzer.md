@@ -60,12 +60,6 @@ O GPIO não deve alimentar diretamente a carga.
 
 A pinagem de base, coletor e emissor deve ser confirmada no datasheet do transistor efetivamente utilizado. Encapsulamentos com aparência semelhante podem ter ordem de pinos diferente.
 
-## Proteção da carga
-
-Se o buzzer utilizado for um transdutor magnético/indutivo, a etapa de potência deve prever a proteção adequada contra transientes. Um diodo de flyback é normalmente utilizado sobre a carga, com orientação que permaneça reversamente polarizada durante a alimentação normal.
-
-A necessidade e o dimensionamento devem ser conferidos com a especificação da unidade instalada.
-
 ## GPIO45 e boot
 
 GPIO45 é um pino de strapping do ESP32-S3. O circuito externo deve permitir que a placa inicialize normalmente e não pode forçar nível alto indevido durante reset.

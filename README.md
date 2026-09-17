@@ -38,7 +38,8 @@ A tabela abaixo considera a reprodução de **uma estação de contagem** conect
 | Sensor fotoelétrico E18-D80NK | 1 por estação | Detectar a passagem das peças | Entrada de contagem utilizada pelo firmware |
 | Buzzer KC-1206 | 1 por estação | Sinalização sonora | Acionado por PWM através de transistor |
 | Transistor NPN 2N2222A-1726 | 1 por estação | Acionamento do buzzer | Evita alimentar a carga diretamente pelo GPIO |
-| Resistor 100 kΩ | 3 por estação | Interface do sensor | Valores utilizados no protótipo atual |
+| Resistor 50 kΩ | 1 por estação | Interface do sensor | Utilizado na adequação do sinal do E18-D80NK |
+| Resistor 100 kΩ | 1 por estação | Interface do sensor | Utilizado na adequação do sinal do E18-D80NK |
 | Resistor 2 kΩ | 1 por estação | Interface do transistor/buzzer | Utilizado no comando do transistor |
 | Resistor 220 Ω | 2 por estação | Limitação de corrente dos LEDs | Um resistor em série com cada LED; valor de referência do protótipo |
 | LED verde | 1 por estação | Pulso em cada passagem válida | GPIO 1 por padrão |
@@ -47,7 +48,6 @@ A tabela abaixo considera a reprodução de **uma estação de contagem** conect
 | Jumpers/fios de conexão | Conforme necessário | Interligação elétrica | Macho-macho, macho-fêmea ou conforme a montagem |
 | Cabo USB de dados para a Heltec | 1 por estação | Alimentação, gravação e monitor serial | Deve permitir transferência de dados |
 | Fonte/linha de 5 V adequada | 1 por estação | Alimentar os componentes de 5 V | Utilizar GND comum entre os elementos da estação |
-| Diodo de proteção para carga indutiva | 1 por estação | Proteção do acionamento do buzzer | Recomendado para a montagem final; dimensionar conforme o componente usado |
 | Esteira ou estrutura de passagem | 1 | Movimentar as peças pelo ponto de leitura | Pode ser substituída por passagem manual durante testes |
 | Raspberry Pi 5 | 1 por instalação | Executar o servidor central | Um único servidor pode atender várias estações |
 | Fonte USB-C 27 W para Raspberry Pi 5 | 1 | Alimentar a Raspberry Pi | A documentação do servidor recomenda fonte adequada à Pi 5 |
@@ -98,22 +98,33 @@ Os principais componentes são a Heltec, o sensor E18-D80NK, o buzzer KC-1206, o
 
 O servidor está definido no repositório [Grafana_Dashboards, revisão de referência `6359597`](https://github.com/ValdimiroAlves/Grafana_Dashboards/tree/6359597918faf1b41a83b39492e5ba1cee65c281).
 
-| Serviço | Tag configurada |
-|---|---|
-| Eclipse Mosquitto | `eclipse-mosquitto:2` |
-| PostgreSQL | `postgres:16.15-alpine` |
-| Node-RED | `nodered/node-red:5.0.7` + `node-red-contrib-postgresql@0.16.2` |
-| Grafana OSS | `grafana/grafana-oss:11.2.0` |
-| Sistema operacional recomendado | Raspberry Pi OS Lite 64-bit |
-| Orquestração | Docker Engine + Docker Compose plugin |
+| Componente | Versão utilizada | Onde está definida |
+|---|---|---|
+| PostgreSQL | **16.15-alpine** | `docker-compose.yml` |
+| Grafana OSS | **11.2.0** | `docker-compose.yml` |
+| Node-RED | **5.0.7** | `node-red/Dockerfile` |
+| node-red-contrib-postgresql | **0.16.2** | `node-red/Dockerfile` |
+| Eclipse Mosquitto | **2** | `docker-compose.yml` |
+| Sistema operacional recomendado | Raspberry Pi OS Lite 64-bit | `INSTALL-raspberrypi.md` |
+| Python `paho-mqtt` | Sem versão fixada | instalação via `pip` no repositório do servidor |
+| Docker Engine / Docker Compose | Sem versão fixada | utiliza a versão instalada na Raspberry Pi |
 
 ### Observação sobre reprodutibilidade
 
-O firmware está fixado em ESP-IDF 5.5.5. No servidor, a versão do Grafana está fixada em `11.2.0`, mas a tag `2` do Mosquitto não fixa um patch específico. PostgreSQL (`16.15-alpine`) e Node-RED (`5.0.7`) têm versões explícitas na revisão de referência; as imagens não estão fixadas por digest.
+O firmware está fixado em ESP-IDF 5.5.5.
 
-Para uma implantação totalmente reprodutível, recomenda-se futuramente substituir essas tags por versões completas ou por digests de imagem Docker.
+No servidor, PostgreSQL (`16.15-alpine`), Grafana OSS (`11.2.0`),
+Node-RED (`5.0.7`) e `node-red-contrib-postgresql` (`0.16.2`)
+possuem versões explícitas na revisão de referência.
 
-Também não há uma versão exata de Docker Engine, Docker Compose, Raspberry Pi OS ou `paho-mqtt` fixada pelo projeto neste momento. O README não atribui versões que o código não define.
+O Eclipse Mosquitto utiliza a tag `2`, que fixa apenas a versão major
+e pode apontar para diferentes versões `2.x` ao longo do tempo.
+
+Docker Engine, Docker Compose, Raspberry Pi OS e `paho-mqtt` não possuem
+versões exatas fixadas pelo projeto.
+
+Para maior reprodutibilidade futura, as imagens Docker podem ser fixadas
+por versões completas ou por digests.
 
 ## Como reproduzir
 
