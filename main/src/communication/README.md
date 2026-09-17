@@ -272,7 +272,7 @@ ss -lnt | grep 1883
 Separe o problema por etapas:
 
 1. confirme a mensagem no Mosquitto com `mosquitto_sub`;
-2. confira logs do Telegraf;
+2. confira logs do Node-RED;
 3. consulte diretamente o InfluxDB;
 4. somente depois investigue o dashboard Grafana.
 
